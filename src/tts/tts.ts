@@ -481,8 +481,10 @@ export function setLastTtsAttempt(entry: TtsStatusEntry | undefined): void {
   lastTtsAttempt = entry;
 }
 
-function resolveOutputFormat(channelId?: string | null) {
-  if (channelId === "telegram") {
+function resolveOutputFormat(channelId?: string | null, rawChannel?: string) {
+  // Check both normalized ID and raw channel string for telegram
+  const isTelegram = channelId === "telegram" || rawChannel?.toLowerCase() === "telegram";
+  if (isTelegram) {
     return TELEGRAM_OUTPUT;
   }
   return DEFAULT_OUTPUT;
@@ -1178,7 +1180,7 @@ export async function textToSpeech(params: {
   const config = resolveTtsConfig(params.cfg);
   const prefsPath = params.prefsPath ?? resolveTtsPrefsPath(config);
   const channelId = resolveChannelId(params.channel);
-  const output = resolveOutputFormat(channelId);
+  const output = resolveOutputFormat(channelId, params.channel);
 
   if (params.text.length > config.maxTextLength) {
     return {
