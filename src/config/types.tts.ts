@@ -56,6 +56,8 @@ export type TtsConfig = {
   /** OpenAI configuration. */
   openai?: {
     apiKey?: string;
+    /** Custom OpenAI-compatible TTS endpoint (e.g., for Qwen, Kokoro, LocalAI). */
+    baseUrl?: string;
     model?: string;
     voice?: string;
   };

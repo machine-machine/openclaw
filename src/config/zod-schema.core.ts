@@ -204,6 +204,7 @@ export const TtsConfigSchema = z
     openai: z
       .object({
         apiKey: z.string().optional(),
+        baseUrl: z.string().optional(),
         model: z.string().optional(),
         voice: z.string().optional(),
       })

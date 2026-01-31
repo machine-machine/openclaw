@@ -108,6 +108,7 @@ export type ResolvedTtsConfig = {
   };
   openai: {
     apiKey?: string;
+    baseUrl: string;
     model: string;
     voice: string;
   };
@@ -282,6 +283,11 @@ export function resolveTtsConfig(cfg: OpenClawConfig): ResolvedTtsConfig {
     },
     openai: {
       apiKey: raw.openai?.apiKey,
+      baseUrl: (
+        raw.openai?.baseUrl?.trim() ||
+        process.env.OPENAI_TTS_BASE_URL?.trim() ||
+        "https://api.openai.com/v1"
+      ).replace(/\/+$/, ""),
       model: raw.openai?.model ?? DEFAULT_OPENAI_MODEL,
       voice: raw.openai?.voice ?? DEFAULT_OPENAI_VOICE,
     },
@@ -1079,17 +1085,19 @@ async function elevenLabsTTS(params: {
 async function openaiTTS(params: {
   text: string;
   apiKey: string;
+  baseUrl: string;
   model: string;
   voice: string;
   responseFormat: "mp3" | "opus" | "pcm";
   timeoutMs: number;
 }): Promise<Buffer> {
-  const { text, apiKey, model, voice, responseFormat, timeoutMs } = params;
+  const { text, apiKey, baseUrl, model, voice, responseFormat, timeoutMs } = params;
 
-  if (!isValidOpenAIModel(model)) {
+  const isCustomEndpoint = baseUrl !== "https://api.openai.com/v1";
+  if (!isCustomEndpoint && !isValidOpenAIModel(model)) {
     throw new Error(`Invalid model: ${model}`);
   }
-  if (!isValidOpenAIVoice(voice)) {
+  if (!isCustomEndpoint && !isValidOpenAIVoice(voice)) {
     throw new Error(`Invalid voice: ${voice}`);
   }
 
@@ -1097,7 +1105,7 @@ async function openaiTTS(params: {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(`${getOpenAITtsBaseUrl()}/audio/speech`, {
+    const response = await fetch(`${baseUrl}/audio/speech`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -1293,6 +1301,7 @@ export async function textToSpeech(params: {
         audioBuffer = await openaiTTS({
           text: params.text,
           apiKey,
+          baseUrl: config.openai.baseUrl,
           model: openaiModelOverride ?? config.openai.model,
           voice: openaiVoiceOverride ?? config.openai.voice,
           responseFormat: output.openai,
@@ -1395,6 +1404,7 @@ export async function textToSpeechTelephony(params: {
       const audioBuffer = await openaiTTS({
         text: params.text,
         apiKey,
+        baseUrl: config.openai.baseUrl,
         model: config.openai.model,
         voice: config.openai.voice,
         responseFormat: output.format,
