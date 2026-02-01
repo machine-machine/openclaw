@@ -28,6 +28,11 @@ function isValidMedia(candidate: string, opts?: { allowSpaces?: boolean }) {
     return true;
   }
 
+  // Allow absolute paths to /tmp/ (used by TTS and other temp outputs)
+  if (candidate.startsWith("/tmp/") && !candidate.includes("..")) {
+    return true;
+  }
+
   // Local paths: only allow safe relative paths starting with ./ that do not traverse upwards.
   return candidate.startsWith("./") && !candidate.includes("..");
 }
