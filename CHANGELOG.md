@@ -21,6 +21,7 @@ Docs: https://docs.openclaw.ai
 - Onboarding: add Moonshot (.cn) auth choice and keep the China base URL when preserving defaults. (#7180) Thanks @waynelwz.
 - Onboarding: add xAI (Grok) auth choice and provider defaults. (#9885) Thanks @grp06.
 - Docs: clarify tmux send-keys for TUI by splitting text and Enter. (#7737) Thanks @Wangnov.
+- Web UI: add Token Usage dashboard with session analytics. (#8462) Thanks @mcinteerj.
 - Docs: mirror the landing page revamp for zh-CN (features, quickstart, docs directory, network model, credits). (#8994) Thanks @joshp123.
 - Docs: strengthen secure DM mode guidance for multi-user inboxes with an explicit warning and example. (#9377) Thanks @Shrinija17.
 - Docs: document `activeHours` heartbeat field with timezone resolution chain and example. (#9366) Thanks @unisone.
@@ -36,6 +37,7 @@ Docs: https://docs.openclaw.ai
 
 - Control UI: add hardened fallback for asset resolution in global npm installs. (#4855) Thanks @anapivirtua.
 - Update: remove dead restore control-ui step that failed on gitignored dist/ output.
+- Update: avoid wiping prebuilt Control UI assets during dev auto-builds (`tsdown --no-clean`), run update doctor via `openclaw.mjs`, and auto-restore missing UI assets after doctor. (#10146) Thanks @gumadeiras.
 - Models: add forward-compat fallback for `openai-codex/gpt-5.3-codex` when model registry hasn't discovered it yet. (#9989) Thanks @w1kke.
 - Auto-reply/Docs: normalize `extra-high` (and spaced variants) to `xhigh` for Codex thinking levels, and align Codex 5.3 FAQ examples. (#9976) Thanks @slonce70.
 - Compaction: remove orphaned `tool_result` messages during history pruning to prevent session corruption from aborted tool calls. (#9868, fixes #9769, #9724, #9672)
@@ -53,6 +55,7 @@ Docs: https://docs.openclaw.ai
 - Web UI: resolve header logo path when `gateway.controlUi.basePath` is set. (#7178) Thanks @Yeom-JinHo.
 - Web UI: apply button styling to the new-messages indicator.
 - Onboarding: infer auth choice from non-interactive API key flags. (#8484) Thanks @f-trycua.
+- Usage: include estimated cost when breakdown is missing and keep `usage.cost` days support. (#8462) Thanks @mcinteerj.
 - Security: keep untrusted channel metadata out of system prompts (Slack/Discord). Thanks @KonstantinMirin.
 - Security: redact channel credentials (tokens, passwords, API keys, secrets) from gateway config APIs and preserve secrets during Control UI round-trips. (#9858) Thanks @abdelsfane.
 - Discord: treat allowlisted senders as owner for system-prompt identity hints while keeping channel topics untrusted.
