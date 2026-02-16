@@ -42,6 +42,41 @@ import { incrementRunCompactionCount, persistRunSessionUsage } from "./session-r
 import { createTypingSignaler } from "./typing-mode.js";
 
 const BLOCK_REPLY_SEND_TIMEOUT_MS = 15_000;
+const UNSCHEDULED_REMINDER_NOTE =
+  "Note: I did not schedule a reminder in this turn, so this will not trigger automatically.";
+const REMINDER_COMMITMENT_PATTERNS: RegExp[] = [
+  /\b(?:i\s*['’]?ll|i will)\s+(?:make sure to\s+)?(?:remember|remind|ping|follow up|follow-up|check back|circle back)\b/i,
+  /\b(?:i\s*['’]?ll|i will)\s+(?:set|create|schedule)\s+(?:a\s+)?reminder\b/i,
+];
+
+function hasUnbackedReminderCommitment(text: string): boolean {
+  const normalized = text.toLowerCase();
+  if (!normalized.trim()) {
+    return false;
+  }
+  if (normalized.includes(UNSCHEDULED_REMINDER_NOTE.toLowerCase())) {
+    return false;
+  }
+  return REMINDER_COMMITMENT_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function appendUnscheduledReminderNote(payloads: ReplyPayload[]): ReplyPayload[] {
+  let appended = false;
+  return payloads.map((payload) => {
+    if (appended || payload.isError || typeof payload.text !== "string") {
+      return payload;
+    }
+    if (!hasUnbackedReminderCommitment(payload.text)) {
+      return payload;
+    }
+    appended = true;
+    const trimmed = payload.text.trimEnd();
+    return {
+      ...payload,
+      text: `${trimmed}\n\n${UNSCHEDULED_REMINDER_NOTE}`,
+    };
+  });
+}
 
 export async function runReplyAgent(params: {
   commandBody: string;
@@ -157,22 +192,26 @@ export async function runReplyAgent(params: {
           buffer: createAudioAsVoiceBuffer({ isAudioPayload }),
         })
       : null;
+  const touchActiveSessionEntry = async () => {
+    if (!activeSessionEntry || !activeSessionStore || !sessionKey) {
+      return;
+    }
+    const updatedAt = Date.now();
+    activeSessionEntry.updatedAt = updatedAt;
+    activeSessionStore[sessionKey] = activeSessionEntry;
+    if (storePath) {
+      await updateSessionStoreEntry({
+        storePath,
+        sessionKey,
+        update: async () => ({ updatedAt }),
+      });
+    }
+  };
 
   if (shouldSteer && isStreaming) {
     const steered = queueEmbeddedPiMessage(followupRun.run.sessionId, followupRun.prompt);
     if (steered && !shouldFollowup) {
-      if (activeSessionEntry && activeSessionStore && sessionKey) {
-        const updatedAt = Date.now();
-        activeSessionEntry.updatedAt = updatedAt;
-        activeSessionStore[sessionKey] = activeSessionEntry;
-        if (storePath) {
-          await updateSessionStoreEntry({
-            storePath,
-            sessionKey,
-            update: async () => ({ updatedAt }),
-          });
-        }
-      }
+      await touchActiveSessionEntry();
       typing.cleanup();
       return undefined;
     }
@@ -180,18 +219,7 @@ export async function runReplyAgent(params: {
 
   if (isActive && (shouldFollowup || resolvedQueue.mode === "steer")) {
     enqueueFollowupRun(queueKey, followupRun, resolvedQueue);
-    if (activeSessionEntry && activeSessionStore && sessionKey) {
-      const updatedAt = Date.now();
-      activeSessionEntry.updatedAt = updatedAt;
-      activeSessionStore[sessionKey] = activeSessionEntry;
-      if (storePath) {
-        await updateSessionStoreEntry({
-          storePath,
-          sessionKey,
-          update: async () => ({ updatedAt }),
-        });
-      }
-    }
+    await touchActiveSessionEntry();
     typing.cleanup();
     return undefined;
   }
@@ -427,7 +455,19 @@ export async function runReplyAgent(params: {
       return finalizeWithFollowup(undefined, queueKey, runFollowupTurn);
     }
 
-    await signalTypingIfNeeded(replyPayloads, typingSignals);
+    const successfulCronAdds = runResult.successfulCronAdds ?? 0;
+    const hasReminderCommitment = replyPayloads.some(
+      (payload) =>
+        !payload.isError &&
+        typeof payload.text === "string" &&
+        hasUnbackedReminderCommitment(payload.text),
+    );
+    const guardedReplyPayloads =
+      hasReminderCommitment && successfulCronAdds === 0
+        ? appendUnscheduledReminderNote(replyPayloads)
+        : replyPayloads;
+
+    await signalTypingIfNeeded(guardedReplyPayloads, typingSignals);
 
     if (isDiagnosticsEnabled(cfg) && hasNonzeroUsage(usage)) {
       const input = usage.input ?? 0;
@@ -457,6 +497,7 @@ export async function runReplyAgent(params: {
           promptTokens,
           total: totalTokens,
         },
+        lastCallUsage: runResult.meta.agentMeta?.lastCallUsage,
         context: {
           limit: contextTokensUsed,
           used: totalTokens,
@@ -494,7 +535,7 @@ export async function runReplyAgent(params: {
     }
 
     // If verbose is enabled and this is a new session, prepend a session hint.
-    let finalPayloads = replyPayloads;
+    let finalPayloads = guardedReplyPayloads;
     const verboseEnabled = resolvedVerboseLevel !== "off";
     if (autoCompactionCompleted) {
       const count = await incrementRunCompactionCount({

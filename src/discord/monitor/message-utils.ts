@@ -18,6 +18,11 @@ export type DiscordChannelInfo = {
   ownerId?: string;
 };
 
+type DiscordMessageWithChannelId = Message & {
+  channel_id?: unknown;
+  rawData?: { channel_id?: unknown };
+};
+
 type DiscordSnapshotAuthor = {
   id?: string | null;
   username?: string | null;
@@ -46,6 +51,29 @@ const DISCORD_CHANNEL_INFO_CACHE = new Map<
 
 export function __resetDiscordChannelInfoCacheForTest() {
   DISCORD_CHANNEL_INFO_CACHE.clear();
+}
+
+function normalizeDiscordChannelId(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value).trim();
+  }
+  return "";
+}
+
+export function resolveDiscordMessageChannelId(params: {
+  message: Message;
+  eventChannelId?: string | number | null;
+}): string {
+  const message = params.message as DiscordMessageWithChannelId;
+  return (
+    normalizeDiscordChannelId(message.channelId) ||
+    normalizeDiscordChannelId(message.channel_id) ||
+    normalizeDiscordChannelId(message.rawData?.channel_id) ||
+    normalizeDiscordChannelId(params.eventChannelId)
+  );
 }
 
 export async function resolveDiscordChannelInfo(
@@ -123,6 +151,46 @@ export async function resolveMediaList(
     } catch (err) {
       const id = attachment.id ?? attachment.url;
       logVerbose(`discord: failed to download attachment ${id}: ${String(err)}`);
+    }
+  }
+  return out;
+}
+
+export async function resolveForwardedMediaList(
+  message: Message,
+  maxBytes: number,
+): Promise<DiscordMediaInfo[]> {
+  const snapshots = resolveDiscordMessageSnapshots(message);
+  if (snapshots.length === 0) {
+    return [];
+  }
+  const out: DiscordMediaInfo[] = [];
+  for (const snapshot of snapshots) {
+    const attachments = snapshot.message?.attachments;
+    if (!attachments || attachments.length === 0) {
+      continue;
+    }
+    for (const attachment of attachments) {
+      try {
+        const fetched = await fetchRemoteMedia({
+          url: attachment.url,
+          filePathHint: attachment.filename ?? attachment.url,
+        });
+        const saved = await saveMediaBuffer(
+          fetched.buffer,
+          fetched.contentType ?? attachment.content_type,
+          "inbound",
+          maxBytes,
+        );
+        out.push({
+          path: saved.path,
+          contentType: saved.contentType,
+          placeholder: inferPlaceholder(attachment),
+        });
+      } catch (err) {
+        const id = attachment.id ?? attachment.url;
+        logVerbose(`discord: failed to download forwarded attachment ${id}: ${String(err)}`);
+      }
     }
   }
   return out;

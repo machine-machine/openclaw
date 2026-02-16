@@ -65,6 +65,8 @@ export type EmbeddedPiRunResult = {
   messagingToolSentTexts?: string[];
   // Messaging tool targets that successfully sent a message during the run.
   messagingToolSentTargets?: MessagingToolSend[];
+  // Count of successful cron.add tool calls in this run.
+  successfulCronAdds?: number;
 };
 
 export type EmbeddedPiCompactResult = {
@@ -83,6 +85,7 @@ export type EmbeddedPiCompactResult = {
 export type EmbeddedSandboxInfo = {
   enabled: boolean;
   workspaceDir?: string;
+  containerWorkspaceDir?: string;
   workspaceAccess?: "none" | "ro" | "rw";
   agentWorkspaceMount?: string;
   browserBridgeUrl?: string;
