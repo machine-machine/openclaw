@@ -177,6 +177,7 @@ function resolveAnthropicSonnet46ForwardCompatModel(
     trimmedModelId,
     templateIds,
     modelRegistry,
+    patch: { contextWindow: 1_000_000 },
   });
 }
 

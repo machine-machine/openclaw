@@ -15,6 +15,22 @@ import {
 } from "../pi-model-discovery.js";
 
 type InlineModelEntry = ModelDefinitionConfig & { provider: string; baseUrl?: string };
+
+// m2 patch: correct context windows for models where Pi SDK catalog lags behind actual API.
+const M2_CONTEXT_WINDOW_OVERRIDES: Partial<Record<string, number>> = {
+  "claude-sonnet-4-6": 1_000_000,
+};
+
+function applyM2ContextOverride(model: Model<Api>, provider: string): Model<Api> {
+  if (normalizeProviderId(provider) !== "anthropic") {
+    return model;
+  }
+  const override = M2_CONTEXT_WINDOW_OVERRIDES[model.id?.toLowerCase()];
+  if (!override) {
+    return model;
+  }
+  return { ...model, contextWindow: override };
+}
 type InlineProviderConfig = {
   baseUrl?: string;
   api?: ModelDefinitionConfig["api"];
@@ -63,7 +79,10 @@ export function resolveModel(
       (entry) => normalizeProviderId(entry.provider) === normalizedProvider && entry.id === modelId,
     );
     if (inlineMatch) {
-      const normalized = normalizeModelCompat(inlineMatch as Model<Api>);
+      const normalized = applyM2ContextOverride(
+        normalizeModelCompat(inlineMatch as Model<Api>),
+        provider,
+      );
       return {
         model: normalized,
         authStorage,
@@ -74,7 +93,7 @@ export function resolveModel(
     // Otherwise, configured providers can default to a generic API and break specific transports.
     const forwardCompat = resolveForwardCompatModel(provider, modelId, modelRegistry);
     if (forwardCompat) {
-      return { model: forwardCompat, authStorage, modelRegistry };
+      return { model: applyM2ContextOverride(forwardCompat, provider), authStorage, modelRegistry };
     }
     const providerCfg = providers[provider];
     if (providerCfg || modelId.startsWith("mock-")) {
@@ -98,7 +117,11 @@ export function resolveModel(
       modelRegistry,
     };
   }
-  return { model: normalizeModelCompat(model), authStorage, modelRegistry };
+  return {
+    model: applyM2ContextOverride(normalizeModelCompat(model), provider),
+    authStorage,
+    modelRegistry,
+  };
 }
 
 /**
