@@ -104,11 +104,18 @@ function resolveOpenAICodexGpt53FallbackModel(
   } as Model<Api>);
 }
 
-function resolveAnthropicOpus46ForwardCompatModel(
-  provider: string,
-  modelId: string,
-  modelRegistry: ModelRegistry,
-): Model<Api> | undefined {
+function resolveAnthropic46ForwardCompatModel(params: {
+  provider: string;
+  modelId: string;
+  modelRegistry: ModelRegistry;
+  dashModelId: string;
+  dotModelId: string;
+  dashTemplateId: string;
+  dotTemplateId: string;
+  fallbackTemplateIds: readonly string[];
+  patch?: Partial<Model<Api>>;
+}): Model<Api> | undefined {
+  const { provider, modelId, modelRegistry, dashModelId, dotModelId } = params;
   const normalizedProvider = normalizeProviderId(provider);
   if (normalizedProvider !== "anthropic") {
     return undefined;
@@ -116,29 +123,47 @@ function resolveAnthropicOpus46ForwardCompatModel(
 
   const trimmedModelId = modelId.trim();
   const lower = trimmedModelId.toLowerCase();
-  const isOpus46 =
-    lower === ANTHROPIC_OPUS_46_MODEL_ID ||
-    lower === ANTHROPIC_OPUS_46_DOT_MODEL_ID ||
-    lower.startsWith(`${ANTHROPIC_OPUS_46_MODEL_ID}-`) ||
-    lower.startsWith(`${ANTHROPIC_OPUS_46_DOT_MODEL_ID}-`);
-  if (!isOpus46) {
+  const is46Model =
+    lower === dashModelId ||
+    lower === dotModelId ||
+    lower.startsWith(`${dashModelId}-`) ||
+    lower.startsWith(`${dotModelId}-`);
+  if (!is46Model) {
     return undefined;
   }
 
   const templateIds: string[] = [];
-  if (lower.startsWith(ANTHROPIC_OPUS_46_MODEL_ID)) {
-    templateIds.push(lower.replace(ANTHROPIC_OPUS_46_MODEL_ID, "claude-opus-4-5"));
+  if (lower.startsWith(dashModelId)) {
+    templateIds.push(lower.replace(dashModelId, params.dashTemplateId));
   }
-  if (lower.startsWith(ANTHROPIC_OPUS_46_DOT_MODEL_ID)) {
-    templateIds.push(lower.replace(ANTHROPIC_OPUS_46_DOT_MODEL_ID, "claude-opus-4.5"));
+  if (lower.startsWith(dotModelId)) {
+    templateIds.push(lower.replace(dotModelId, params.dotTemplateId));
   }
-  templateIds.push(...ANTHROPIC_OPUS_TEMPLATE_MODEL_IDS);
+  templateIds.push(...params.fallbackTemplateIds);
 
   return cloneFirstTemplateModel({
     normalizedProvider,
     trimmedModelId,
     templateIds,
     modelRegistry,
+    patch: params.patch,
+  });
+}
+
+function resolveAnthropicOpus46ForwardCompatModel(
+  provider: string,
+  modelId: string,
+  modelRegistry: ModelRegistry,
+): Model<Api> | undefined {
+  return resolveAnthropic46ForwardCompatModel({
+    provider,
+    modelId,
+    modelRegistry,
+    dashModelId: ANTHROPIC_OPUS_46_MODEL_ID,
+    dotModelId: ANTHROPIC_OPUS_46_DOT_MODEL_ID,
+    dashTemplateId: "claude-opus-4-5",
+    dotTemplateId: "claude-opus-4.5",
+    fallbackTemplateIds: ANTHROPIC_OPUS_TEMPLATE_MODEL_IDS,
   });
 }
 
@@ -147,36 +172,15 @@ function resolveAnthropicSonnet46ForwardCompatModel(
   modelId: string,
   modelRegistry: ModelRegistry,
 ): Model<Api> | undefined {
-  const normalizedProvider = normalizeProviderId(provider);
-  if (normalizedProvider !== "anthropic") {
-    return undefined;
-  }
-
-  const trimmedModelId = modelId.trim();
-  const lower = trimmedModelId.toLowerCase();
-  const isSonnet46 =
-    lower === ANTHROPIC_SONNET_46_MODEL_ID ||
-    lower === ANTHROPIC_SONNET_46_DOT_MODEL_ID ||
-    lower.startsWith(`${ANTHROPIC_SONNET_46_MODEL_ID}-`) ||
-    lower.startsWith(`${ANTHROPIC_SONNET_46_DOT_MODEL_ID}-`);
-  if (!isSonnet46) {
-    return undefined;
-  }
-
-  const templateIds: string[] = [];
-  if (lower.startsWith(ANTHROPIC_SONNET_46_MODEL_ID)) {
-    templateIds.push(lower.replace(ANTHROPIC_SONNET_46_MODEL_ID, "claude-sonnet-4-5"));
-  }
-  if (lower.startsWith(ANTHROPIC_SONNET_46_DOT_MODEL_ID)) {
-    templateIds.push(lower.replace(ANTHROPIC_SONNET_46_DOT_MODEL_ID, "claude-sonnet-4.5"));
-  }
-  templateIds.push(...ANTHROPIC_SONNET_TEMPLATE_MODEL_IDS);
-
-  return cloneFirstTemplateModel({
-    normalizedProvider,
-    trimmedModelId,
-    templateIds,
+  return resolveAnthropic46ForwardCompatModel({
+    provider,
+    modelId,
     modelRegistry,
+    dashModelId: ANTHROPIC_SONNET_46_MODEL_ID,
+    dotModelId: ANTHROPIC_SONNET_46_DOT_MODEL_ID,
+    dashTemplateId: "claude-sonnet-4-5",
+    dotTemplateId: "claude-sonnet-4.5",
+    fallbackTemplateIds: ANTHROPIC_SONNET_TEMPLATE_MODEL_IDS,
     patch: { contextWindow: 1_000_000 },
   });
 }
