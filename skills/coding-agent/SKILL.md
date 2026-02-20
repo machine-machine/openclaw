@@ -284,6 +284,58 @@ This prevents the user from seeing only "Agent failed before reply" and having n
 
 ---
 
+## 🔁 Deploy Verification (Mandatory for Coolify Deployments)
+
+After pushing code that triggers a Coolify deploy, **you must verify it worked** before reporting success. Skipping this = silent failures that reach production.
+
+### The Flyloop
+
+```
+code change → local test (if exists) → git push → wait for deploy → smoke test → ✅ done
+                                                                  ↓ fail
+                                                              alert + rollback
+```
+
+### Verification Script
+
+Use `verify-deploy.sh` from m2-config:
+
+```bash
+# Wait for deploy + run smoke test
+~/.openclaw/workspace/platform/m2-config/scripts/verify-deploy.sh \
+  <coolify_app_uuid> \
+  --test "curl -sf https://your-app.machinemachine.ai/health" \
+  --timeout 300
+
+# Exit codes: 0=pass, 1=deploy failed, 2=smoke test failed, 3=timeout
+```
+
+### What to test (minimum)
+
+| App type     | Smoke test                                            |
+| ------------ | ----------------------------------------------------- | ------------------ |
+| REST API     | `curl -sf https://api/health                          | grep ok`           |
+| Web frontend | `curl -sf https://app/                                | grep -i '<title>'` |
+| TTS gateway  | `curl -sf http://speech_gateway/health`               |
+| Any          | `curl -sf https://app/ -o /dev/null -w "%{http_code}" | grep 200`          |
+
+### If tests fail
+
+1. Report the failure immediately — include the error output
+2. Check Coolify logs: `curl -s "$COOLIFY_API_URL/applications/$UUID/logs" -H "Authorization: Bearer $TOKEN"`
+3. Do NOT claim success — tell master what broke and the last known-good commit
+
+### Pre-push checks (if project has tests)
+
+```bash
+# Run before pushing
+cd ~/project && npm test 2>&1 | tail -20
+# or: pnpm test / cargo test / pytest / etc.
+# If tests fail → fix first, then push
+```
+
+---
+
 ## Auto-Notify on Completion
 
 For long-running background tasks, append a wake trigger to your prompt so OpenClaw gets notified immediately when the agent finishes (instead of waiting for the next heartbeat):
