@@ -56,7 +56,8 @@ function ttsUsage(): ReplyPayload {
       `**Providers:**\n` +
       `• edge — Free, fast (default)\n` +
       `• openai — High quality (requires API key)\n` +
-      `• elevenlabs — Premium voices (requires API key)\n\n` +
+      `• elevenlabs — Premium voices (requires API key)\n` +
+      `• m2 — Self-hosted voice cloning (Qwen3-TTS)\n\n` +
       `**Text Limit (default: 1500, max: 4096):**\n` +
       `When text exceeds the limit:\n` +
       `• Summary ON: AI summarizes, then generates audio\n` +
@@ -171,20 +172,22 @@ export const handleTtsCommands: CommandHandler = async (params, allowTextCommand
             `OpenAI key: ${hasOpenAI ? "✅" : "❌"}\n` +
             `ElevenLabs key: ${hasElevenLabs ? "✅" : "❌"}\n` +
             `Edge enabled: ${hasEdge ? "✅" : "❌"}\n` +
-            `Usage: /tts provider openai | elevenlabs | edge`,
+            `Usage: /tts provider openai | elevenlabs | edge | m2`,
         },
       };
     }
 
     const requested = args.trim().toLowerCase();
-    if (requested !== "openai" && requested !== "elevenlabs" && requested !== "edge") {
+    const validProviders = ["openai", "elevenlabs", "edge", "m2"];
+    if (!validProviders.includes(requested)) {
       return { shouldContinue: false, reply: ttsUsage() };
     }
 
-    setTtsProvider(prefsPath, requested);
+    setTtsProvider(prefsPath, requested as "openai" | "elevenlabs" | "edge" | "m2");
+    const providerLabel = requested === "m2" ? "m2 (self-hosted voice cloning)" : requested;
     return {
       shouldContinue: false,
-      reply: { text: `✅ TTS provider set to ${requested}.` },
+      reply: { text: `✅ TTS provider set to ${providerLabel}.` },
     };
   }
 

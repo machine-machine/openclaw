@@ -509,13 +509,13 @@ export function resolveTtsApiKey(
   if (provider === "elevenlabs") {
     return config.elevenlabs.apiKey || process.env.ELEVENLABS_API_KEY || process.env.XI_API_KEY;
   }
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "m2") {
     return config.openai.apiKey || process.env.OPENAI_API_KEY;
   }
   return undefined;
 }
 
-export const TTS_PROVIDERS = ["openai", "elevenlabs", "edge"] as const;
+export const TTS_PROVIDERS = ["openai", "elevenlabs", "edge", "m2"] as const;
 
 export function resolveTtsProviderOrder(primary: TtsProvider): TtsProvider[] {
   return [primary, ...TTS_PROVIDERS.filter((provider) => provider !== primary)];
@@ -690,7 +690,8 @@ export async function textToSpeech(params: {
         audioPath,
         latencyMs,
         provider,
-        outputFormat: provider === "openai" ? output.openai : output.elevenlabs,
+        outputFormat:
+          provider === "openai" || provider === "m2" ? output.openai : output.elevenlabs,
         voiceCompatible: output.voiceCompatible,
       };
     } catch (err) {
