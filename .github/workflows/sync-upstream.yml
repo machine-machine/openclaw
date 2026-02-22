@@ -1,0 +1,105 @@
+name: Sync Upstream + Release
+
+on:
+  schedule:
+    # Daily at 01:00 UTC — merge openclaw/openclaw:main into m2-custom
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force release even if no new upstream commits'
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    name: Sync upstream main → m2-custom
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    outputs:
+      updated: ${{ steps.sync.outputs.updated }}
+      tag:     ${{ steps.tag.outputs.tag }}
+
+    steps:
+      - name: Checkout m2-custom
+        uses: actions/checkout@v4
+        with:
+          ref: m2-custom
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/openclaw/openclaw.git
+          git fetch upstream main --depth=50
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          UPSTREAM_SHA=$(git rev-parse upstream/main)
+          MERGE_BASE=$(git merge-base HEAD upstream/main)
+          if [ "$UPSTREAM_SHA" = "$MERGE_BASE" ]; then
+            echo "No new upstream commits"
+            echo "has_new=false" >> $GITHUB_OUTPUT
+          else
+            COUNT=$(git rev-list --count ${MERGE_BASE}..upstream/main)
+            echo "New commits from upstream: $COUNT"
+            echo "has_new=true"  >> $GITHUB_OUTPUT
+            echo "count=$COUNT"  >> $GITHUB_OUTPUT
+          fi
+
+      - name: Merge upstream/main into m2-custom
+        id: sync
+        if: steps.check.outputs.has_new == 'true' || inputs.force == true
+        run: |
+          git config user.name  "m2[bot]"
+          git config user.email "m2-bot@machinemachine.ai"
+          git merge upstream/main \
+            --no-edit \
+            -m "chore: sync upstream openclaw/openclaw main → m2-custom $(date +%Y-%m-%d)" \
+            || {
+              echo "Merge conflict — aborting, keeping m2-custom as-is"
+              git merge --abort
+              echo "updated=false" >> $GITHUB_OUTPUT
+              exit 0
+            }
+          git push origin m2-custom
+          echo "updated=true" >> $GITHUB_OUTPUT
+
+      - name: Create dated release tag
+        id: tag
+        if: steps.sync.outputs.updated == 'true'
+        run: |
+          TAG="m2-custom-$(date +%Y-%m-%d)"
+          # Delete existing same-day tag if re-running
+          git tag -d "$TAG" 2>/dev/null || true
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+          git tag "$TAG" -m "Daily sync: upstream main → m2-custom $(date +%Y-%m-%d)
+Upstream commits merged: ${{ steps.check.outputs.count }}"
+          git push origin "$TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Tagged: $TAG"
+
+  rebuild-image:
+    name: Trigger m2-desktop agent-latest rebuild
+    needs: sync
+    if: needs.sync.outputs.updated == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch to m2-desktop
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.M2_DESKTOP_DISPATCH_TOKEN }}
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: 'machine-machine',
+              repo:  'm2-desktop',
+              event_type: 'openclaw-updated',
+              client_payload: {
+                tag:    '${{ needs.sync.outputs.tag }}',
+                source: 'openclaw-sync',
+              }
+            });
+            console.log('Dispatched rebuild to machine-machine/m2-desktop');
