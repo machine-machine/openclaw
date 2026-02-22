@@ -14,7 +14,10 @@ import {
   type ModelRegistry,
 } from "../pi-model-discovery.js";
 
-type InlineModelEntry = ModelDefinitionConfig & { provider: string; baseUrl?: string };
+type InlineModelEntry = ModelDefinitionConfig & {
+  provider: string;
+  baseUrl?: string;
+};
 
 // m2 patch: correct context windows for models where Pi SDK catalog lags behind actual API.
 const M2_CONTEXT_WINDOW_OVERRIDES: Partial<Record<string, number>> = {
