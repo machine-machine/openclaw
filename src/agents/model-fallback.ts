@@ -164,7 +164,9 @@ function resolveImageFallbackCandidates(params: {
   const imageFallbacks = resolveAgentModelFallbackValues(params.cfg?.agents?.defaults?.imageModel);
 
   for (const raw of imageFallbacks) {
-    addRaw(raw, true);
+    // Explicitly configured image fallbacks should remain reachable even when a
+    // model allowlist is present.
+    addRaw(raw, false);
   }
 
   return candidates;
@@ -206,12 +208,24 @@ function resolveFallbackCandidates(params: {
     if (params.fallbacksOverride !== undefined) {
       return params.fallbacksOverride;
     }
-    // Skip configured fallback chain when the user runs a non-default override.
-    // In that case, retry should return directly to configured primary.
-    if (!sameModelCandidate(normalizedPrimary, configuredPrimary)) {
-      return []; // Override model failed → go straight to configured default
+    const configuredFallbacks = resolveAgentModelFallbackValues(
+      params.cfg?.agents?.defaults?.model,
+    );
+    if (sameModelCandidate(normalizedPrimary, configuredPrimary)) {
+      return configuredFallbacks;
     }
-    return resolveAgentModelFallbackValues(params.cfg?.agents?.defaults?.model);
+    // Preserve resilience after failover: when current model is one of the
+    // configured fallback refs, keep traversing the configured fallback chain.
+    const isConfiguredFallback = configuredFallbacks.some((raw) => {
+      const resolved = resolveModelRefFromString({
+        raw: String(raw ?? ""),
+        defaultProvider,
+        aliasIndex,
+      });
+      return resolved ? sameModelCandidate(resolved.ref, normalizedPrimary) : false;
+    });
+    // Keep legacy override behavior for ad-hoc models outside configured chain.
+    return isConfiguredFallback ? configuredFallbacks : [];
   })();
 
   for (const raw of modelFallbacks) {
@@ -223,7 +237,9 @@ function resolveFallbackCandidates(params: {
     if (!resolved) {
       continue;
     }
-    addCandidate(resolved.ref, true);
+    // Fallbacks are explicit user intent; do not silently filter them by the
+    // model allowlist.
+    addCandidate(resolved.ref, false);
   }
 
   if (params.fallbacksOverride === undefined && primary?.provider && primary.model) {
