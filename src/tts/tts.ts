@@ -486,10 +486,15 @@ export function setLastTtsAttempt(entry: TtsStatusEntry | undefined): void {
   lastTtsAttempt = entry;
 }
 
+/** Channels that require opus audio and support voice-bubble playback */
+const VOICE_BUBBLE_CHANNELS = new Set(["telegram", "feishu", "whatsapp"]);
+
 function resolveOutputFormat(channelId?: string | null, rawChannel?: string) {
-  // Check both normalized ID and raw channel string for telegram
-  const isTelegram = channelId === "telegram" || rawChannel?.toLowerCase() === "telegram";
-  if (isTelegram) {
+  // Check normalized ID first, then raw channel string as fallback (m2-custom: handles normalization edge cases)
+  const isVoiceBubble =
+    (channelId && VOICE_BUBBLE_CHANNELS.has(channelId)) ||
+    (rawChannel && VOICE_BUBBLE_CHANNELS.has(rawChannel.toLowerCase()));
+  if (isVoiceBubble) {
     return TELEGRAM_OUTPUT;
   }
   return DEFAULT_OUTPUT;
@@ -923,7 +928,8 @@ export async function maybeApplyTtsToPayload(params: {
     };
 
     const channelId = resolveChannelId(params.channel);
-    const shouldVoice = channelId === "telegram" && result.voiceCompatible === true;
+    const shouldVoice =
+      channelId !== null && VOICE_BUBBLE_CHANNELS.has(channelId) && result.voiceCompatible === true;
     const finalPayload = {
       ...nextPayload,
       mediaUrl: result.audioPath,
