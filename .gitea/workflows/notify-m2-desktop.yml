@@ -10,8 +10,8 @@ jobs:
     steps:
       - name: Trigger m2-desktop rebuild
         run: |
-          curl -s -X POST \
+          curl -sf -X POST \
             -H "Authorization: token ${{ secrets.FORGEJO_TOKEN }}" \
             -H "Content-Type: application/json" \
-            "http://git.machinemachine.ai/api/v1/repos/machine.machine/m2-desktop/dispatches" \
-            -d '{"type": "openclaw-updated", "inputs": {"ref": "${{ github.sha }}"}}'
+            "http://git.machinemachine.ai/api/v1/repos/machine.machine/m2-desktop/actions/workflows/build-base-image.yml/dispatches" \
+            -d '{"ref": "guacamole"}'
