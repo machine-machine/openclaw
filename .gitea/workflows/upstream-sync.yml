@@ -1,0 +1,57 @@
+name: Upstream sync — openclaw/openclaw → m2-custom
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: m2-custom
+          fetch-depth: 0
+          token: ${{ secrets.FORGEJO_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "m2"
+          git config user.email "m2@machinemachine.ai"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/openclaw/openclaw.git || true
+
+      - name: Fetch upstream
+        run: git fetch upstream main
+
+      - name: Merge upstream
+        id: merge
+        run: |
+          git merge upstream/main --no-edit 2>&1 | tee /tmp/merge-output.txt
+          if grep -q "CONFLICT" /tmp/merge-output.txt; then
+            echo "has_conflict=true" >> $GITHUB_OUTPUT
+            git merge --abort
+          else
+            echo "has_conflict=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push if clean merge
+        if: steps.merge.outputs.has_conflict == 'false'
+        run: git push origin m2-custom
+
+      - name: Notify on conflict
+        if: steps.merge.outputs.has_conflict == 'true'
+        run: |
+          curl -s "https://api.telegram.org/bot${{ secrets.M2_BOT_TOKEN }}/sendMessage" \
+            -d "chat_id=437589940&text=⚠️ upstream sync conflict in m2-custom — manual merge needed"
+
+      - name: Notify on success
+        if: steps.merge.outputs.has_conflict == 'false'
+        run: |
+          COMMITS=$(git log origin/m2-custom..HEAD --oneline 2>/dev/null | wc -l)
+          if [ "$COMMITS" -gt "0" ]; then
+            curl -s "https://api.telegram.org/bot${{ secrets.M2_BOT_TOKEN }}/sendMessage" \
+              -d "chat_id=437589940&text=✅ m2-custom synced with openclaw upstream ($COMMITS new commits)"
+          fi
