@@ -47,6 +47,7 @@ import {
 } from "../session-utils.js";
 import { formatForLog } from "../ws-log.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
+import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
 import { normalizeRpcAttachmentsToChatAttachments } from "./attachment-normalize.js";
 import { appendInjectedAssistantMessageToTranscript } from "./chat-transcript-inject.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
@@ -875,6 +876,10 @@ export const chatHandlers: GatewayRequestHandlers = {
       const isChannelScopedSession = sessionPeerShapeCandidates.some((part) =>
         CHANNEL_SCOPED_SESSION_SHAPES.has(part),
       );
+      const hasLegacyChannelPeerShape =
+        !isChannelScopedSession &&
+        typeof sessionScopeParts[1] === "string" &&
+        sessionChannelHint === routeChannelCandidate;
       // Only inherit prior external route metadata for channel-scoped sessions.
       // Channel-agnostic sessions (main, direct:<peer>, etc.) can otherwise
       // leak stale routes across surfaces.
@@ -882,7 +887,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         sessionChannelHint &&
         sessionChannelHint !== INTERNAL_MESSAGE_CHANNEL &&
         !isChannelAgnosticSessionScope &&
-        isChannelScopedSession,
+        (isChannelScopedSession || hasLegacyChannelPeerShape),
       );
       const hasDeliverableRoute =
         canInheritDeliverableRoute &&
@@ -1026,23 +1031,31 @@ export const chatHandlers: GatewayRequestHandlers = {
               message,
             });
           }
-          context.dedupe.set(`chat:${clientRunId}`, {
-            ts: Date.now(),
-            ok: true,
-            payload: { runId: clientRunId, status: "ok" as const },
+          setGatewayDedupeEntry({
+            dedupe: context.dedupe,
+            key: `chat:${clientRunId}`,
+            entry: {
+              ts: Date.now(),
+              ok: true,
+              payload: { runId: clientRunId, status: "ok" as const },
+            },
           });
         })
         .catch((err) => {
           const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
-          context.dedupe.set(`chat:${clientRunId}`, {
-            ts: Date.now(),
-            ok: false,
-            payload: {
-              runId: clientRunId,
-              status: "error" as const,
-              summary: String(err),
+          setGatewayDedupeEntry({
+            dedupe: context.dedupe,
+            key: `chat:${clientRunId}`,
+            entry: {
+              ts: Date.now(),
+              ok: false,
+              payload: {
+                runId: clientRunId,
+                status: "error" as const,
+                summary: String(err),
+              },
+              error,
             },
-            error,
           });
           broadcastChatError({
             context,
@@ -1061,11 +1074,15 @@ export const chatHandlers: GatewayRequestHandlers = {
         status: "error" as const,
         summary: String(err),
       };
-      context.dedupe.set(`chat:${clientRunId}`, {
-        ts: Date.now(),
-        ok: false,
-        payload,
-        error,
+      setGatewayDedupeEntry({
+        dedupe: context.dedupe,
+        key: `chat:${clientRunId}`,
+        entry: {
+          ts: Date.now(),
+          ok: false,
+          payload,
+          error,
+        },
       });
       respond(false, payload, error, {
         runId: clientRunId,
