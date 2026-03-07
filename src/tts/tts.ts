@@ -28,6 +28,7 @@ import { stripMarkdown } from "../line/markdown-to-line.js";
 import { isVoiceCompatibleAudio } from "../media/audio.js";
 import { CONFIG_DIR, resolveUserPath } from "../utils.js";
 import {
+  DEFAULT_OPENAI_BASE_URL,
   edgeTTS,
   elevenLabsTTS,
   inferEdgeExtension,
@@ -295,10 +296,11 @@ export function resolveTtsConfig(cfg: OpenClawConfig): ResolvedTtsConfig {
         value: raw.openai?.apiKey,
         path: "messages.tts.openai.apiKey",
       }),
+      // Config > env var > default; strip trailing slashes for consistency.
       baseUrl: (
         raw.openai?.baseUrl?.trim() ||
         process.env.OPENAI_TTS_BASE_URL?.trim() ||
-        "https://api.openai.com/v1"
+        DEFAULT_OPENAI_BASE_URL
       ).replace(/\/+$/, ""),
       model: raw.openai?.model ?? DEFAULT_OPENAI_MODEL,
       voice: raw.openai?.voice ?? DEFAULT_OPENAI_VOICE,
@@ -833,7 +835,7 @@ export async function maybeApplyTtsToPayload(params: {
   }
 
   const text = params.payload.text ?? "";
-  const directives = parseTtsDirectives(text, config.modelOverrides);
+  const directives = parseTtsDirectives(text, config.modelOverrides, config.openai.baseUrl);
   if (directives.warnings.length > 0) {
     logVerbose(`TTS: ignored directive overrides (${directives.warnings.join("; ")})`);
   }
