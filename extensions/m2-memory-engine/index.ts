@@ -229,42 +229,131 @@ type GraphRelation = {
 
 class MemgraphClient {
   private enabled: boolean;
+  private driver: ReturnType<typeof import("neo4j-driver").default.driver> | null = null;
+  private driverPromise: Promise<void> | null = null;
 
   constructor(
-    private readonly _url: string,
+    private readonly url: string,
     enabled: boolean,
-    private readonly logger: { warn: (msg: string) => void },
+    private readonly logger: { warn: (msg: string) => void; info?: (msg: string) => void },
   ) {
     this.enabled = enabled;
   }
 
+  private async ensureDriver(): Promise<void> {
+    if (this.driver) return;
+    if (this.driverPromise) return this.driverPromise;
+    this.driverPromise = (async () => {
+      try {
+        const neo4j = await import("neo4j-driver");
+        this.driver = neo4j.default.driver(this.url, neo4j.default.auth.basic("", ""));
+        await this.driver.verifyConnectivity();
+        this.logger.info?.("m2-memory-engine: Memgraph connected");
+      } catch (err) {
+        this.logger.warn(`m2-memory-engine: Memgraph connection failed: ${String(err)}`);
+        this.driver = null;
+        this.driverPromise = null;
+        throw err;
+      }
+    })();
+    return this.driverPromise;
+  }
+
   async queryRelated(
-    _entities: string[],
-    _hops = 2,
+    entities: string[],
+    hops = 2,
   ): Promise<Array<{ entity: string; relation: string; score: number }>> {
-    if (!this.enabled) {
+    if (!this.enabled || entities.length === 0) return [];
+
+    try {
+      await this.ensureDriver();
+      if (!this.driver) return [];
+
+      const session = this.driver.session();
+      try {
+        // Match entities by name (case-insensitive) and traverse up to N hops
+        const result = await session.run(
+          `MATCH (n) WHERE toLower(n.name) IN $names
+           MATCH (n)-[r*1..${Math.min(hops, 3)}]-(m)
+           WITH DISTINCT m, n, r
+           UNWIND r AS rel
+           RETURN DISTINCT m.name AS entity,
+                  type(rel) AS relation,
+                  labels(m)[0] AS entityType,
+                  1.0 / (size(r) + 0.1) AS score
+           ORDER BY score DESC
+           LIMIT 20`,
+          { names: entities.map((e) => e.toLowerCase()) },
+        );
+
+        return result.records.map((rec) => ({
+          entity: rec.get("entity") as string,
+          relation: rec.get("relation") as string,
+          score: (rec.get("score") as number) || 0.5,
+        }));
+      } finally {
+        await session.close();
+      }
+    } catch (err) {
+      this.logger.warn(`m2-memory-engine: graph queryRelated failed: ${String(err)}`);
       return [];
     }
-
-    // Phase 2: implement Cypher query via neo4j driver
-    // const session = this.driver.session();
-    // const result = await session.run(`MATCH (n)-[r*1..${hops}]-(m) WHERE n.name IN $entities RETURN ...`);
-    this.logger.warn("m2-memory-engine: Memgraph queryRelated not yet implemented (Phase 2)");
-    return [];
   }
 
-  async upsertEntity(_entity: GraphEntity): Promise<void> {
-    if (!this.enabled) {
-      return;
+  async upsertEntity(entity: GraphEntity): Promise<void> {
+    if (!this.enabled) return;
+
+    try {
+      await this.ensureDriver();
+      if (!this.driver) return;
+
+      const session = this.driver.session();
+      try {
+        const label = entity.type.replace(/[^a-zA-Z0-9_]/g, "") || "Entity";
+        await session.run(
+          `MERGE (n:${label} {name: $name})
+           ON CREATE SET n.created_at = timestamp()
+           ON MATCH SET n.updated_at = timestamp()`,
+          { name: entity.name.toLowerCase() },
+        );
+      } finally {
+        await session.close();
+      }
+    } catch (err) {
+      this.logger.warn(`m2-memory-engine: graph upsertEntity failed: ${String(err)}`);
     }
-    this.logger.warn("m2-memory-engine: Memgraph upsertEntity not yet implemented (Phase 2)");
   }
 
-  async upsertRelation(_relation: GraphRelation): Promise<void> {
-    if (!this.enabled) {
-      return;
+  async upsertRelation(relation: GraphRelation): Promise<void> {
+    if (!this.enabled) return;
+
+    try {
+      await this.ensureDriver();
+      if (!this.driver) return;
+
+      const session = this.driver.session();
+      try {
+        const relType = relation.type.replace(/[^a-zA-Z0-9_]/g, "") || "RELATES_TO";
+        await session.run(
+          `MATCH (a {name: $from}), (b {name: $to})
+           MERGE (a)-[r:${relType}]->(b)
+           ON CREATE SET r.created_at = timestamp()
+           ON MATCH SET r.count = coalesce(r.count, 1) + 1`,
+          { from: relation.from.toLowerCase(), to: relation.to.toLowerCase() },
+        );
+      } finally {
+        await session.close();
+      }
+    } catch (err) {
+      this.logger.warn(`m2-memory-engine: graph upsertRelation failed: ${String(err)}`);
     }
-    this.logger.warn("m2-memory-engine: Memgraph upsertRelation not yet implemented (Phase 2)");
+  }
+
+  close(): void {
+    if (this.driver) {
+      this.driver.close().catch(() => {});
+      this.driver = null;
+    }
   }
 }
 
@@ -278,26 +367,62 @@ type NerEntity = {
   score: number;
 };
 
+const NER_LABELS = [
+  "person",
+  "organization",
+  "project",
+  "location",
+  "topic",
+  "decision",
+  "event",
+  "technology",
+  "product",
+];
+const NER_TIMEOUT_MS = 5_000;
+const NER_MIN_CONFIDENCE = 0.5;
+
 class NerClient {
   private enabled: boolean;
 
   constructor(
-    private readonly _url: string,
+    private readonly url: string,
     enabled: boolean,
     private readonly logger: { warn: (msg: string) => void },
   ) {
     this.enabled = enabled;
   }
 
-  async extractEntities(_text: string): Promise<NerEntity[]> {
-    if (!this.enabled) {
+  async extractEntities(text: string): Promise<NerEntity[]> {
+    if (!this.enabled || !text || text.length < 10) return [];
+
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), NER_TIMEOUT_MS);
+
+      const response = await fetch(`${this.url}/extract`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.slice(0, 2000), labels: NER_LABELS }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (!response.ok) {
+        this.logger.warn(`m2-memory-engine: NER returned ${response.status}`);
+        return [];
+      }
+
+      const data = (await response.json()) as {
+        entities: Array<{ span: string; type: string; confidence: number }>;
+      };
+
+      return (data.entities || [])
+        .filter((e) => e.confidence >= NER_MIN_CONFIDENCE)
+        .map((e) => ({ entity: e.span, label: e.type, score: e.confidence }));
+    } catch (err) {
+      this.logger.warn(`m2-memory-engine: NER failed: ${String(err)}`);
       return [];
     }
-
-    // Phase 2: POST to GLiNER API
-    // const response = await fetch(this.url + "/predict", { method: "POST", body: JSON.stringify({ text, labels: [...] }) });
-    this.logger.warn("m2-memory-engine: NER extractEntities not yet implemented (Phase 2)");
-    return [];
   }
 }
 
@@ -708,28 +833,44 @@ const memoryPlugin = {
             cfg.autoRecall.minScore,
           );
 
-          // Phase 2: if graph enabled, expand with Memgraph results
-          if (cfg.autoRecall.includeGraph && cfg.memgraph.enabled) {
+          // Phase 2: graph-expanded recall — extract entities from prompt, traverse graph, search related memories
+          let graphContext = "";
+          if (cfg.autoRecall.includeGraph && cfg.memgraph.enabled && cfg.ner.enabled) {
             try {
-              // Would extract entities from prompt, query graph, fetch related memories
-              // const entities = await ner.extractEntities(event.prompt);
-              // const graphResults = await memgraph.queryRelated(entities.map(e => e.entity), cfg.autoRecall.graphHops);
-              // Merge graph results with vector results
+              const entities = await ner.extractEntities(event.prompt);
+              if (entities.length > 0) {
+                const graphResults = await memgraph.queryRelated(
+                  entities.map((e) => e.entity),
+                  cfg.autoRecall.graphHops ?? 2,
+                );
+                if (graphResults.length > 0) {
+                  // Build a compact graph context string
+                  const graphLines = graphResults
+                    .slice(0, 10)
+                    .map((g) => `${g.entity} (${g.relation})`)
+                    .join(", ");
+                  graphContext = `\n<graph-context>\nRelated entities: ${graphLines}\n</graph-context>`;
+                }
+              }
             } catch {
               // Non-fatal: graph recall is best-effort
             }
           }
 
-          if (results.length === 0) {
+          if (results.length === 0 && !graphContext) {
             return;
           }
 
-          api.logger.info?.(`m2-memory-engine: injecting ${results.length} memories into context`);
+          const vectorCount = results.length;
+          api.logger.info?.(
+            `m2-memory-engine: injecting ${vectorCount} memories${graphContext ? " + graph context" : ""} into context`,
+          );
 
           return {
-            prependContext: formatRelevantMemoriesContext(
-              results.map((r) => ({ category: r.entry.category, text: r.entry.text })),
-            ),
+            prependContext:
+              formatRelevantMemoriesContext(
+                results.map((r) => ({ category: r.entry.category, text: r.entry.text })),
+              ) + graphContext,
           };
         } catch (err) {
           api.logger.warn(`m2-memory-engine: recall failed: ${String(err)}`);
@@ -846,6 +987,7 @@ const memoryPlugin = {
         );
       },
       stop: () => {
+        memgraph.close();
         api.logger.info("m2-memory-engine: stopped");
       },
     });
