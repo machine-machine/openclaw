@@ -5,7 +5,7 @@
   "description": "M² Qdrant-backed long-term memory plugin with auto-recall/capture, knowledge graph, and entity extraction",
   "type": "module",
   "dependencies": {
-    "@qdrant/js-client-rest": "^1.12.0",
+    "@qdrant/js-client-rest": "1.12.0",
     "@sinclair/typebox": "0.34.48",
     "openai": "^6.27.0"
   },
