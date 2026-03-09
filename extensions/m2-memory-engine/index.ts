@@ -46,6 +46,7 @@ class QdrantMemoryDB {
   private client: QdrantClient;
   private collectionReady = false;
   private initPromise: Promise<void> | null = null;
+  private useNamedVectors = false; // true if collection uses named "dense" vectors
 
   constructor(
     private readonly url: string,
@@ -83,6 +84,17 @@ class QdrantMemoryDB {
             distance: "Cosine",
           },
         });
+        this.useNamedVectors = false;
+      } else {
+        // Check if existing collection uses named vectors (created by memory watcher)
+        try {
+          const info = await this.client.getCollection(this.collection);
+          const vectors = info.config?.params?.vectors;
+          this.useNamedVectors =
+            vectors != null && typeof vectors === "object" && "dense" in vectors;
+        } catch {
+          this.useNamedVectors = false;
+        }
       }
 
       this.collectionReady = true;
@@ -105,7 +117,7 @@ class QdrantMemoryDB {
       points: [
         {
           id,
-          vector: entry.vector,
+          vector: this.useNamedVectors ? { dense: entry.vector } : entry.vector,
           payload: {
             text: entry.text,
             importance: entry.importance,
@@ -122,8 +134,9 @@ class QdrantMemoryDB {
   async search(vector: number[], limit = 5, minScore = 0.3): Promise<MemorySearchResult[]> {
     await this.ensureCollection();
 
+    const searchVector = this.useNamedVectors ? { name: "dense", vector } : vector;
     const results = await this.client.search(this.collection, {
-      vector,
+      vector: searchVector,
       limit,
       score_threshold: minScore,
       with_payload: true,
