@@ -526,7 +526,7 @@ export function detectCategory(text: string): MemoryCategory {
 // ============================================================================
 
 const memoryPlugin = {
-  id: "m2-memory-engine",
+  id: "memory-engine",
   name: "M² Memory Engine",
   description: "Qdrant-backed long-term memory with auto-recall/capture, knowledge graph, and NER",
   kind: "memory" as const,
@@ -980,7 +980,7 @@ const memoryPlugin = {
     // ========================================================================
 
     api.registerService({
-      id: "m2-memory-engine",
+      id: "memory-engine",
       start: () => {
         api.logger.info(
           `m2-memory-engine: initialized (qdrant: ${qdrantUrl}, collection: ${collection}, model: ${model})`,
