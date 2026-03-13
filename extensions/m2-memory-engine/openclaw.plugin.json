@@ -1,5 +1,5 @@
 {
-  "id": "m2-memory-engine",
+  "id": "memory-engine",
   "kind": "memory",
   "uiHints": {
     "embeddings.apiKey": {
@@ -80,9 +80,15 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "url": { "type": "string" },
-          "collection": { "type": "string" },
-          "apiKey": { "type": "string" }
+          "url": {
+            "type": "string"
+          },
+          "collection": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          }
         },
         "required": ["url"]
       },
@@ -90,10 +96,18 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "url": { "type": "string" },
-          "apiKey": { "type": "string" },
-          "model": { "type": "string" },
-          "dimensions": { "type": "number" }
+          "url": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "number"
+          }
         },
         "required": ["url", "apiKey"]
       },
@@ -101,37 +115,65 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "url": { "type": "string" },
-          "enabled": { "type": "boolean" }
+          "url": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
         }
       },
       "ner": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "url": { "type": "string" },
-          "enabled": { "type": "boolean" }
+          "url": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
         }
       },
       "autoRecall": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "enabled": { "type": "boolean" },
-          "maxResults": { "type": "number" },
-          "minScore": { "type": "number" },
-          "includeGraph": { "type": "boolean" },
-          "graphHops": { "type": "number" }
+          "enabled": {
+            "type": "boolean"
+          },
+          "maxResults": {
+            "type": "number"
+          },
+          "minScore": {
+            "type": "number"
+          },
+          "includeGraph": {
+            "type": "boolean"
+          },
+          "graphHops": {
+            "type": "number"
+          }
         }
       },
       "autoCapture": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "enabled": { "type": "boolean" },
-          "maxChars": { "type": "number", "minimum": 100, "maximum": 10000 },
-          "extractEntities": { "type": "boolean" },
-          "dedupThreshold": { "type": "number" }
+          "enabled": {
+            "type": "boolean"
+          },
+          "maxChars": {
+            "type": "number",
+            "minimum": 100,
+            "maximum": 10000
+          },
+          "extractEntities": {
+            "type": "boolean"
+          },
+          "dedupThreshold": {
+            "type": "number"
+          }
         }
       }
     },
