@@ -821,10 +821,49 @@ const memoryPlugin = {
     // Track recalled memory IDs per session for auto-reinforcement (M2 scoring)
     const recalledMemoryIds = new Set<string>();
 
+    // ========================================================================
+    // Lazy Context Classifier — fast heuristic to skip recall when not needed
+    // Saves embedding call + Qdrant search (~300-500 tokens) for trivial messages
+    // ========================================================================
+
+    const SKIP_RECALL_PATTERNS = [
+      /^(ok|okay|yes|no|sure|thanks|thank you|got it|perfect|great|done|k|👍|✅|nice|cool|lol|haha|nope|yep|agreed|sounds good|go ahead|proceed|continue|next|stop|pause|cancel)[\s!.]*$/i,
+      /^HEARTBEAT/,
+      /^NO_REPLY/,
+    ];
+
+    const NEEDS_RECALL_PATTERNS = [
+      /\b(remember|recall|know|knew|did|said|told|mentioned|discussed|decided|agreed|what|who|when|where|why|how)\b/i,
+      /\b(memory|context|history|before|previous|last time|earlier|yesterday)\b/i,
+      /\b(peter|mariusz|alfred|gunnar|nasr|julia|fleet|planka|qdrant|memgraph|coolify)\b/i,
+    ];
+
+    function needsRecall(prompt: string): "skip" | "vector" | "full" {
+      const trimmed = prompt.trim();
+      if (trimmed.length < 8) return "skip";
+      if (SKIP_RECALL_PATTERNS.some((p) => p.test(trimmed))) return "skip";
+      if (trimmed.length < 30 && !NEEDS_RECALL_PATTERNS.some((p) => p.test(trimmed))) return "skip";
+      // Graph recall only if entities/relationships mentioned
+      if (
+        cfg.autoRecall.includeGraph &&
+        /\b(who|knows|connected|introduced|related|between)\b/i.test(trimmed)
+      ) {
+        return "full";
+      }
+      return "vector";
+    }
+
     // Auto-recall: inject relevant memories before agent starts
     if (cfg.autoRecall.enabled) {
       api.on("before_agent_start", async (event) => {
         if (!event.prompt || event.prompt.length < 5) {
+          return;
+        }
+
+        // Lazy classifier — skip recall for trivial messages
+        const recallMode = needsRecall(event.prompt);
+        if (recallMode === "skip") {
+          api.logger.info?.("m2-memory-engine: skipping recall (trivial message)");
           return;
         }
 
@@ -836,9 +875,14 @@ const memoryPlugin = {
             cfg.autoRecall.minScore,
           );
 
-          // Phase 2: graph-expanded recall — extract entities from prompt, traverse graph, search related memories
+          // Phase 2: graph-expanded recall — only when message signals entity/relationship need
           let graphContext = "";
-          if (cfg.autoRecall.includeGraph && cfg.memgraph.enabled && cfg.ner.enabled) {
+          if (
+            recallMode === "full" &&
+            cfg.autoRecall.includeGraph &&
+            cfg.memgraph.enabled &&
+            cfg.ner.enabled
+          ) {
             try {
               const entities = await ner.extractEntities(event.prompt);
               if (entities.length > 0) {
