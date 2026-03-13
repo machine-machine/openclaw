@@ -1,0 +1,18 @@
+{
+  "name": "@machinemachine/memory-engine",
+  "version": "2026.3.7",
+  "private": true,
+  "description": "M² Qdrant-backed long-term memory plugin with auto-recall/capture, knowledge graph, and entity extraction",
+  "type": "module",
+  "dependencies": {
+    "@qdrant/js-client-rest": "1.12.0",
+    "@sinclair/typebox": "0.34.48",
+    "neo4j-driver": "^5.27.0",
+    "openai": "^6.27.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
