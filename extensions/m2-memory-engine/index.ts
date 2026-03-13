@@ -818,6 +818,9 @@ const memoryPlugin = {
     // Lifecycle Hooks
     // ========================================================================
 
+    // Track recalled memory IDs per session for auto-reinforcement (M2 scoring)
+    const recalledMemoryIds = new Set<string>();
+
     // Auto-recall: inject relevant memories before agent starts
     if (cfg.autoRecall.enabled) {
       api.on("before_agent_start", async (event) => {
@@ -862,6 +865,12 @@ const memoryPlugin = {
           }
 
           const vectorCount = results.length;
+
+          // Track recalled IDs for M2 reinforcement
+          for (const r of results) {
+            recalledMemoryIds.add(r.entry.id);
+          }
+
           api.logger.info?.(
             `m2-memory-engine: injecting ${vectorCount} memories${graphContext ? " + graph context" : ""} into context`,
           );
@@ -968,6 +977,39 @@ const memoryPlugin = {
 
           if (stored > 0) {
             api.logger.info(`m2-memory-engine: auto-captured ${stored} memories`);
+          }
+
+          // M2 Auto-reinforcement: boost importance of recalled memories that were used
+          if (recalledMemoryIds.size > 0) {
+            try {
+              const memoryApiUrl = process.env.MEMORY_API_URL || "http://memory-api:8000";
+              let reinforced = 0;
+              for (const memId of recalledMemoryIds) {
+                try {
+                  const resp = await fetch(`${memoryApiUrl}/memory/feedback`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      memory_id: memId,
+                      signal: "retrieval",
+                      agent_id: collection.replace("agent_memory_", ""),
+                    }),
+                  });
+                  if (resp.ok) reinforced++;
+                } catch {
+                  // Individual feedback failure is non-fatal
+                }
+              }
+              if (reinforced > 0) {
+                api.logger.info(
+                  `m2-memory-engine: reinforced ${reinforced}/${recalledMemoryIds.size} recalled memories`,
+                );
+              }
+            } catch {
+              // Non-fatal
+            } finally {
+              recalledMemoryIds.clear();
+            }
           }
         } catch (err) {
           api.logger.warn(`m2-memory-engine: capture failed: ${String(err)}`);
