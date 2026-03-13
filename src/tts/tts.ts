@@ -37,6 +37,7 @@ import {
   isValidVoiceId,
   OPENAI_TTS_MODELS,
   OPENAI_TTS_VOICES,
+  resolveOpenAITtsInstructions,
   openaiTTS,
   parseTtsDirectives,
   scheduleCleanup,
@@ -117,6 +118,8 @@ export type ResolvedTtsConfig = {
     baseUrl: string;
     model: string;
     voice: string;
+    speed?: number;
+    instructions?: string;
   };
   edge: {
     enabled: boolean;
@@ -304,6 +307,8 @@ export function resolveTtsConfig(cfg: OpenClawConfig): ResolvedTtsConfig {
       ).replace(/\/+$/, ""),
       model: raw.openai?.model ?? DEFAULT_OPENAI_MODEL,
       voice: raw.openai?.voice ?? DEFAULT_OPENAI_VOICE,
+      speed: raw.openai?.speed,
+      instructions: raw.openai?.instructions?.trim() || undefined,
     },
     edge: {
       enabled: raw.edge?.enabled ?? true,
@@ -696,6 +701,8 @@ export async function textToSpeech(params: {
           baseUrl: config.openai.baseUrl,
           model: openaiModelOverride ?? config.openai.model,
           voice: openaiVoiceOverride ?? config.openai.voice,
+          speed: config.openai.speed,
+          instructions: config.openai.instructions,
           responseFormat: output.openai,
           timeoutMs: config.timeoutMs,
           channel: params.channel,
@@ -795,6 +802,8 @@ export async function textToSpeechTelephony(params: {
         baseUrl: config.openai.baseUrl,
         model: config.openai.model,
         voice: config.openai.voice,
+        speed: config.openai.speed,
+        instructions: config.openai.instructions,
         responseFormat: output.format,
         timeoutMs: config.timeoutMs,
       });
@@ -967,6 +976,7 @@ export const _test = {
   isValidOpenAIModel,
   OPENAI_TTS_MODELS,
   OPENAI_TTS_VOICES,
+  resolveOpenAITtsInstructions,
   parseTtsDirectives,
   resolveModelOverridePolicy,
   summarizeText,
