@@ -1,0 +1,182 @@
+{
+  "id": "memory-engine",
+  "kind": "memory",
+  "uiHints": {
+    "embeddings.apiKey": {
+      "label": "Embeddings API Key",
+      "sensitive": true,
+      "placeholder": "sk-...",
+      "help": "API key for BGE-M3 embeddings proxy (or use ${BGE_PROXY_TOKEN})"
+    },
+    "embeddings.model": {
+      "label": "Embedding Model",
+      "placeholder": "bge-m3",
+      "help": "Embedding model name"
+    },
+    "embeddings.url": {
+      "label": "Embeddings Base URL",
+      "placeholder": "https://bge-proxy.machinemachine.ai/v1",
+      "help": "Base URL for OpenAI-compatible embeddings API"
+    },
+    "embeddings.dimensions": {
+      "label": "Dimensions",
+      "placeholder": "1024",
+      "help": "Vector dimensions (default 1024 for BGE-M3)",
+      "advanced": true
+    },
+    "qdrant.url": {
+      "label": "Qdrant URL",
+      "placeholder": "http://memory-qdrant:6333",
+      "help": "Qdrant server URL"
+    },
+    "qdrant.collection": {
+      "label": "Qdrant Collection",
+      "placeholder": "agent_memory_default",
+      "help": "Qdrant collection name (supports ${AGENT_ID} expansion)",
+      "advanced": true
+    },
+    "memgraph.url": {
+      "label": "Memgraph URL",
+      "placeholder": "bolt://memory-memgraph:7687",
+      "help": "Memgraph bolt URL (optional)",
+      "advanced": true
+    },
+    "memgraph.enabled": {
+      "label": "Enable Memgraph",
+      "help": "Enable knowledge graph integration",
+      "advanced": true
+    },
+    "ner.url": {
+      "label": "NER Service URL",
+      "placeholder": "http://memory-ner:8080",
+      "help": "GLiNER NER API endpoint (optional)",
+      "advanced": true
+    },
+    "ner.enabled": {
+      "label": "Enable NER",
+      "help": "Enable entity extraction via GLiNER",
+      "advanced": true
+    },
+    "autoRecall.enabled": {
+      "label": "Auto-Recall",
+      "help": "Automatically inject relevant memories into context"
+    },
+    "autoCapture.enabled": {
+      "label": "Auto-Capture",
+      "help": "Automatically capture important information from conversations"
+    },
+    "autoCapture.maxChars": {
+      "label": "Capture Max Chars",
+      "help": "Maximum message length eligible for auto-capture",
+      "advanced": true,
+      "placeholder": "500"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "qdrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "collection": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          }
+        },
+        "required": ["url"]
+      },
+      "embeddings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "apiKey": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "number"
+          }
+        },
+        "required": ["url", "apiKey"]
+      },
+      "memgraph": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ner": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "autoRecall": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "maxResults": {
+            "type": "number"
+          },
+          "minScore": {
+            "type": "number"
+          },
+          "includeGraph": {
+            "type": "boolean"
+          },
+          "graphHops": {
+            "type": "number"
+          }
+        }
+      },
+      "autoCapture": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "maxChars": {
+            "type": "number",
+            "minimum": 100,
+            "maximum": 10000
+          },
+          "extractEntities": {
+            "type": "boolean"
+          },
+          "dedupThreshold": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "required": ["qdrant", "embeddings"]
+  }
+}
