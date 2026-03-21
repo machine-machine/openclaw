@@ -13,7 +13,15 @@ const releaseVariants = [
   {
     flavorName: "play",
     gradleTask: ":app:bundlePlayRelease",
-    bundlePath: join(androidDir, "app", "build", "outputs", "bundle", "playRelease", "app-play-release.aab"),
+    bundlePath: join(
+      androidDir,
+      "app",
+      "build",
+      "outputs",
+      "bundle",
+      "playRelease",
+      "app-play-release.aab",
+    ),
   },
   {
     flavorName: "third-party",
@@ -135,7 +143,9 @@ async function main() {
   await $`mkdir -p ${releaseOutputDir}`;
 
   try {
-    await $`./gradlew ${releaseVariants[0].gradleTask} ${releaseVariants[1].gradleTask}`.cwd(androidDir);
+    await $`./gradlew ${releaseVariants[0].gradleTask} ${releaseVariants[1].gradleTask}`.cwd(
+      androidDir,
+    );
   } catch (error) {
     await Bun.write(buildGradlePath, originalText);
     throw error;

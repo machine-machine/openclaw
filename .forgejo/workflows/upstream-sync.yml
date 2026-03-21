@@ -20,7 +20,7 @@ jobs:
 
     outputs:
       updated: ${{ steps.sync.outputs.updated }}
-      tag:     ${{ steps.tag.outputs.tag }}
+      tag: ${{ steps.tag.outputs.tag }}
 
     steps:
       - name: Checkout m2-custom
@@ -98,7 +98,7 @@ Upstream commits merged: ${{ steps.check.outputs.count }}"
               repo:  'm2-desktop',
               event_type: 'openclaw-updated',
               client_payload: {
-                tag:    '${{ needs.sync.outputs.tag }}',
+                tag: '${{ needs.sync.outputs.tag }}',
                 source: 'openclaw-sync',
               }
             });

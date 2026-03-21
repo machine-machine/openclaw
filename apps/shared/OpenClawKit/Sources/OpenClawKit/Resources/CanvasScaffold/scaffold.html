@@ -8,15 +8,15 @@
       (() => {
         try {
           const params = new URLSearchParams(window.location.search);
-          const platform = (params.get('platform') || '').trim().toLowerCase();
+          const platform = (params.get("platform") || "").trim().toLowerCase();
           if (platform) {
             document.documentElement.dataset.platform = platform;
             return;
           }
-          if (/android/i.test(navigator.userAgent || '')) {
-            document.documentElement.dataset.platform = 'android';
+          if (/android/i.test(navigator.userAgent || "")) {
+            document.documentElement.dataset.platform = "android";
           } else {
-            document.documentElement.dataset.platform = 'ios';
+            document.documentElement.dataset.platform = "ios";
           }
         } catch (_) {}
       })();
@@ -41,13 +41,15 @@
         --safe-bottom: env(safe-area-inset-bottom, 0px);
       }
 
-      html, body {
+      html,
+      body {
         height: 100%;
         margin: 0;
       }
 
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
         background:
           radial-gradient(900px 640px at 12% 10%, rgba(91, 157, 255, 0.36), rgba(0, 0, 0, 0) 58%),
           radial-gradient(840px 600px at 88% 16%, rgba(255, 95, 162, 0.24), rgba(0, 0, 0, 0) 62%),
@@ -94,10 +96,18 @@
         opacity: 0.95;
       }
 
-      body[data-state="connected"] { --state: #61d58b; }
-      body[data-state="connecting"] { --state: #ffd05f; }
-      body[data-state="error"] { --state: #ff6d6d; }
-      body[data-state="offline"] { --state: #95a3b9; }
+      body[data-state="connected"] {
+        --state: #61d58b;
+      }
+      body[data-state="connecting"] {
+        --state: #ffd05f;
+      }
+      body[data-state="error"] {
+        --state: #ff6d6d;
+      }
+      body[data-state="offline"] {
+        --state: #95a3b9;
+      }
 
       canvas {
         position: fixed;
@@ -391,13 +401,24 @@
       }
 
       #openclaw-status .title {
-        font: 600 20px -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+        font:
+          600 20px -apple-system,
+          BlinkMacSystemFont,
+          "SF Pro Display",
+          "SF Pro Text",
+          system-ui,
+          sans-serif;
         color: rgba(255, 255, 255, 0.92);
       }
 
       #openclaw-status .subtitle {
         margin-top: 6px;
-        font: 500 12px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+        font:
+          500 12px -apple-system,
+          BlinkMacSystemFont,
+          "SF Pro Text",
+          system-ui,
+          sans-serif;
         color: rgba(255, 255, 255, 0.58);
       }
 
@@ -499,14 +520,17 @@
           </div>
           <h1 id="openclaw-home-title">Your phone stays quiet until it is needed</h1>
           <p id="openclaw-home-subtitle">
-            Pair this device to your gateway to wake it only for real work, keep a live agent overview handy, and avoid battery-draining background loops.
+            Pair this device to your gateway to wake it only for real work, keep a live agent
+            overview handy, and avoid battery-draining background loops.
           </p>
 
           <div class="hero-grid">
             <div class="meta-card">
               <div class="meta-label">Gateway</div>
               <div class="meta-value" id="openclaw-home-gateway">Gateway</div>
-              <div class="meta-subtitle" id="openclaw-home-gateway-caption">Connect to load your agents</div>
+              <div class="meta-subtitle" id="openclaw-home-gateway-caption">
+                Connect to load your agents
+              </div>
             </div>
 
             <div class="meta-card">
@@ -515,7 +539,9 @@
                 <div class="agent-badge" id="openclaw-home-active-badge">OC</div>
                 <div>
                   <div class="name" id="openclaw-home-active-name">Main</div>
-                  <div class="caption" id="openclaw-home-active-caption">Connect to load your agents</div>
+                  <div class="caption" id="openclaw-home-active-caption">
+                    Connect to load your agents
+                  </div>
                 </div>
               </div>
             </div>
@@ -529,7 +555,8 @@
           </div>
           <div class="agent-grid" id="openclaw-home-agent-grid"></div>
           <div class="footer-note" id="openclaw-home-footer">
-            When connected, the gateway can wake the phone with a silent push instead of holding an always-on session.
+            When connected, the gateway can wake the phone with a silent push instead of holding an
+            always-on session.
           </div>
         </div>
       </div>
@@ -544,32 +571,32 @@
 
     <script>
       (() => {
-        const canvas = document.getElementById('openclaw-canvas');
-        const ctx = canvas.getContext('2d');
-        const statusEl = document.getElementById('openclaw-status');
-        const titleEl = document.getElementById('openclaw-status-title');
-        const subtitleEl = document.getElementById('openclaw-status-subtitle');
+        const canvas = document.getElementById("openclaw-canvas");
+        const ctx = canvas.getContext("2d");
+        const statusEl = document.getElementById("openclaw-status");
+        const titleEl = document.getElementById("openclaw-status-title");
+        const subtitleEl = document.getElementById("openclaw-status-subtitle");
         const home = {
-          root: document.getElementById('openclaw-home'),
-          eyebrow: document.getElementById('openclaw-home-eyebrow'),
-          title: document.getElementById('openclaw-home-title'),
-          subtitle: document.getElementById('openclaw-home-subtitle'),
-          gateway: document.getElementById('openclaw-home-gateway'),
-          gatewayCaption: document.getElementById('openclaw-home-gateway-caption'),
-          activeBadge: document.getElementById('openclaw-home-active-badge'),
-          activeName: document.getElementById('openclaw-home-active-name'),
-          activeCaption: document.getElementById('openclaw-home-active-caption'),
-          agentCount: document.getElementById('openclaw-home-agent-count'),
-          agentGrid: document.getElementById('openclaw-home-agent-grid'),
-          footer: document.getElementById('openclaw-home-footer')
+          root: document.getElementById("openclaw-home"),
+          eyebrow: document.getElementById("openclaw-home-eyebrow"),
+          title: document.getElementById("openclaw-home-title"),
+          subtitle: document.getElementById("openclaw-home-subtitle"),
+          gateway: document.getElementById("openclaw-home-gateway"),
+          gatewayCaption: document.getElementById("openclaw-home-gateway-caption"),
+          activeBadge: document.getElementById("openclaw-home-active-badge"),
+          activeName: document.getElementById("openclaw-home-active-name"),
+          activeCaption: document.getElementById("openclaw-home-active-caption"),
+          agentCount: document.getElementById("openclaw-home-agent-count"),
+          agentGrid: document.getElementById("openclaw-home-agent-grid"),
+          footer: document.getElementById("openclaw-home-footer"),
         };
         const debugStatusEnabledByQuery = (() => {
           try {
             const params = new URLSearchParams(window.location.search);
-            const raw = params.get('debugStatus') ?? params.get('debug');
+            const raw = params.get("debugStatus") ?? params.get("debug");
             if (!raw) return false;
             const normalized = String(raw).trim().toLowerCase();
-            return normalized === '1' || normalized === 'true' || normalized === 'yes';
+            return normalized === "1" || normalized === "true" || normalized === "yes";
           } catch (_) {
             return false;
           }
@@ -588,19 +615,19 @@
         function setDebugStatusEnabled(enabled) {
           debugStatusEnabled = !!enabled;
           if (!debugStatusEnabled) {
-            statusEl.style.display = 'none';
+            statusEl.style.display = "none";
           }
         }
 
         function setStatus(title, subtitle) {
           if (!debugStatusEnabled) return;
           if (!title && !subtitle) {
-            statusEl.style.display = 'none';
+            statusEl.style.display = "none";
             return;
           }
-          statusEl.style.display = 'flex';
-          if (typeof title === 'string') titleEl.textContent = title;
-          if (typeof subtitle === 'string') subtitleEl.textContent = subtitle;
+          statusEl.style.display = "flex";
+          if (typeof title === "string") titleEl.textContent = title;
+          if (typeof subtitle === "string") subtitleEl.textContent = subtitle;
         }
 
         function clearChildren(node) {
@@ -608,25 +635,25 @@
         }
 
         function createAgentCard(agent) {
-          const card = document.createElement('div');
-          card.className = `agent-card${agent.isActive ? ' active' : ''}`;
+          const card = document.createElement("div");
+          card.className = `agent-card${agent.isActive ? " active" : ""}`;
 
-          const row = document.createElement('div');
-          row.className = 'agent-row';
+          const row = document.createElement("div");
+          row.className = "agent-row";
 
-          const badge = document.createElement('div');
-          badge.className = 'badge';
-          badge.textContent = agent.badge || 'OC';
+          const badge = document.createElement("div");
+          badge.className = "badge";
+          badge.textContent = agent.badge || "OC";
 
-          const text = document.createElement('div');
+          const text = document.createElement("div");
 
-          const name = document.createElement('div');
-          name.className = 'name';
-          name.textContent = agent.name || agent.id || 'Agent';
+          const name = document.createElement("div");
+          name.className = "name";
+          name.textContent = agent.name || agent.id || "Agent";
 
-          const caption = document.createElement('div');
-          caption.className = 'caption';
-          caption.textContent = agent.caption || 'Ready';
+          const caption = document.createElement("div");
+          caption.className = "caption";
+          caption.textContent = agent.caption || "Ready";
 
           text.appendChild(name);
           text.appendChild(caption);
@@ -637,31 +664,33 @@
         }
 
         function renderHome(state) {
-          if (!state || typeof state !== 'object') return;
+          if (!state || typeof state !== "object") return;
 
-          document.body.dataset.state = state.gatewayState || 'offline';
-          home.root.style.display = 'flex';
-          home.eyebrow.textContent = state.eyebrow || 'Welcome to OpenClaw';
-          home.title.textContent = state.title || 'OpenClaw';
-          home.subtitle.textContent = state.subtitle || '';
-          home.gateway.textContent = state.gatewayLabel || 'Gateway';
-          home.gatewayCaption.textContent = state.gatewayState === 'connected'
-            ? `${state.agentCount || 0} agent${state.agentCount === 1 ? '' : 's'} available`
-            : (state.activeAgentCaption || 'Connect to load your agents');
-          home.activeBadge.textContent = state.activeAgentBadge || 'OC';
-          home.activeName.textContent = state.activeAgentName || 'Main';
-          home.activeCaption.textContent = state.activeAgentCaption || '';
-          home.agentCount.textContent = `${state.agentCount || 0} agent${state.agentCount === 1 ? '' : 's'}`;
-          home.footer.textContent = state.footer || '';
+          document.body.dataset.state = state.gatewayState || "offline";
+          home.root.style.display = "flex";
+          home.eyebrow.textContent = state.eyebrow || "Welcome to OpenClaw";
+          home.title.textContent = state.title || "OpenClaw";
+          home.subtitle.textContent = state.subtitle || "";
+          home.gateway.textContent = state.gatewayLabel || "Gateway";
+          home.gatewayCaption.textContent =
+            state.gatewayState === "connected"
+              ? `${state.agentCount || 0} agent${state.agentCount === 1 ? "" : "s"} available`
+              : state.activeAgentCaption || "Connect to load your agents";
+          home.activeBadge.textContent = state.activeAgentBadge || "OC";
+          home.activeName.textContent = state.activeAgentName || "Main";
+          home.activeCaption.textContent = state.activeAgentCaption || "";
+          home.agentCount.textContent = `${state.agentCount || 0} agent${state.agentCount === 1 ? "" : "s"}`;
+          home.footer.textContent = state.footer || "";
 
           clearChildren(home.agentGrid);
           const agents = Array.isArray(state.agents) ? state.agents : [];
           if (!agents.length) {
-            const empty = document.createElement('div');
-            empty.className = 'empty-state';
-            empty.textContent = state.gatewayState === 'connected'
-              ? 'Your gateway is online. Agents will appear here as soon as the current scope reports them.'
-              : 'Connect this phone to your gateway and the live agent overview will appear here.';
+            const empty = document.createElement("div");
+            empty.className = "empty-state";
+            empty.textContent =
+              state.gatewayState === "connected"
+                ? "Your gateway is online. Agents will appear here as soon as the current scope reports them."
+                : "Connect this phone to your gateway and the live agent overview will appear here.";
             home.agentGrid.appendChild(empty);
             return;
           }
@@ -671,11 +700,11 @@
           });
         }
 
-        window.addEventListener('resize', resize);
+        window.addEventListener("resize", resize);
         resize();
 
         if (!debugStatusEnabled) {
-          statusEl.style.display = 'none';
+          statusEl.style.display = "none";
         }
 
         window.__openclaw = {
@@ -683,7 +712,7 @@
           ctx,
           setDebugStatusEnabled,
           setStatus,
-          renderHome
+          renderHome,
         };
       })();
     </script>
