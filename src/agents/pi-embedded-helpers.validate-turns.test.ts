@@ -700,4 +700,77 @@ describe("validateAnthropicTurns strips dangling tool_use blocks", () => {
     const result = validateAnthropicTurns(msgs);
     expect(result).toHaveLength(3);
   });
+
+  it("deduplicates toolResult blocks with the same toolUseId when merging consecutive user messages", () => {
+    // Simulates the "Continue where you left off" retry scenario:
+    // two consecutive user messages both contain a toolResult for the same tool call
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Do something" }] },
+      {
+        role: "assistant",
+        content: [{ type: "toolUse", id: "tool-abc", name: "read", input: {} }],
+      },
+      // First user message with tool result
+      {
+        role: "user",
+        content: [{ type: "toolResult", toolUseId: "tool-abc", text: "file contents" }],
+      },
+      // Second user message (retry) with the SAME tool result
+      {
+        role: "user",
+        content: [
+          { type: "toolResult", toolUseId: "tool-abc", text: "file contents" },
+          { type: "text", text: "Continue where you left off." },
+        ],
+      },
+    ]);
+
+    const result = validateAnthropicTurns(msgs);
+
+    // The two consecutive user messages should be merged into one
+    expect(result).toHaveLength(3); // user, assistant, merged-user
+
+    const mergedUser = result[2];
+    expect(mergedUser.role).toBe("user");
+    const content = mergedUser.content as Array<{ type: string; toolUseId?: string }>;
+
+    // Should have exactly ONE toolResult for "tool-abc", plus the text block
+    const toolResults = content.filter((b) => b.type === "toolResult");
+    expect(toolResults).toHaveLength(1);
+    expect(toolResults[0].toolUseId).toBe("tool-abc");
+
+    // The text block should still be there
+    const textBlocks = content.filter((b) => b.type === "text");
+    expect(textBlocks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps distinct toolResult blocks when merging consecutive user messages", () => {
+    // Two consecutive user messages with DIFFERENT tool results should both be kept
+    const msgs = asMessages([
+      { role: "user", content: [{ type: "text", text: "Do something" }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "toolUse", id: "tool-1", name: "read", input: {} },
+          { type: "toolUse", id: "tool-2", name: "exec", input: {} },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "toolResult", toolUseId: "tool-1", text: "result 1" }],
+      },
+      {
+        role: "user",
+        content: [{ type: "toolResult", toolUseId: "tool-2", text: "result 2" }],
+      },
+    ]);
+
+    const result = validateAnthropicTurns(msgs);
+    const mergedUser = result[2];
+    const content = mergedUser.content as Array<{ type: string; toolUseId?: string }>;
+    const toolResults = content.filter((b) => b.type === "toolResult");
+    expect(toolResults).toHaveLength(2);
+    expect(toolResults[0].toolUseId).toBe("tool-1");
+    expect(toolResults[1].toolUseId).toBe("tool-2");
+  });
 });
