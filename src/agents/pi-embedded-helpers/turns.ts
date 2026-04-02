@@ -171,10 +171,25 @@ export function mergeConsecutiveUserTurns(
   previous: Extract<AgentMessage, { role: "user" }>,
   current: Extract<AgentMessage, { role: "user" }>,
 ): Extract<AgentMessage, { role: "user" }> {
-  const mergedContent = [
+  const rawContent = [
     ...(Array.isArray(previous.content) ? previous.content : []),
     ...(Array.isArray(current.content) ? current.content : []),
   ];
+
+  // Deduplicate toolResult blocks by toolUseId to prevent
+  // "each tool_use must have a single result" Anthropic API errors.
+  // This can happen when retry logic ("Continue where you left off")
+  // injects a second user message containing the same tool_result.
+  const seenToolUseIds = new Set<string>();
+  const mergedContent = rawContent.filter((block) => {
+    if (block && block.type === "toolResult" && block.toolUseId) {
+      if (seenToolUseIds.has(block.toolUseId)) {
+        return false;
+      }
+      seenToolUseIds.add(block.toolUseId);
+    }
+    return true;
+  });
 
   return {
     ...current,
