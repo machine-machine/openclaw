@@ -630,6 +630,24 @@ export function resolveModelWithRegistry(params: {
   return resolveConfiguredFallbackModel(normalizedParams);
 }
 
+// m2 patch: pi-ai catalog lacks contextWindow for Claude 4.x models — apply correct values.
+const M2_CONTEXT_WINDOW_OVERRIDES: Record<string, number> = {
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-opus-4-6": 1_000_000,
+  "claude-sonnet-4-5": 1_000_000,
+};
+
+function applyM2ContextOverride(model: Model<Api>, provider: string): Model<Api> {
+  if (normalizeProviderId(provider) !== "anthropic") {
+    return model;
+  }
+  const override = M2_CONTEXT_WINDOW_OVERRIDES[model.id?.toLowerCase()];
+  if (!override || model.contextWindow === override) {
+    return model;
+  }
+  return { ...model, contextWindow: override };
+}
+
 export function resolveModel(
   provider: string,
   modelId: string,
@@ -664,7 +682,7 @@ export function resolveModel(
     runtimeHooks,
   });
   if (model) {
-    return { model, authStorage, modelRegistry };
+    return { model: applyM2ContextOverride(model, normalizedRef.provider), authStorage, modelRegistry };
   }
 
   return {
@@ -771,7 +789,7 @@ export async function resolveModelAsync(
     model = await resolveDynamicAttempt({ clearHookCache: true });
   }
   if (model) {
-    return { model, authStorage, modelRegistry };
+    return { model: applyM2ContextOverride(model, normalizedRef.provider), authStorage, modelRegistry };
   }
 
   return {
