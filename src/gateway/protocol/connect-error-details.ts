@@ -1,3 +1,5 @@
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
+
 export const ConnectErrorDetailCodes = {
   AUTH_REQUIRED: "AUTH_REQUIRED",
   AUTH_UNAUTHORIZED: "AUTH_UNAUTHORIZED",
@@ -14,6 +16,7 @@ export const ConnectErrorDetailCodes = {
   AUTH_TAILSCALE_PROXY_MISSING: "AUTH_TAILSCALE_PROXY_MISSING",
   AUTH_TAILSCALE_WHOIS_FAILED: "AUTH_TAILSCALE_WHOIS_FAILED",
   AUTH_TAILSCALE_IDENTITY_MISMATCH: "AUTH_TAILSCALE_IDENTITY_MISMATCH",
+  CONTROL_UI_ORIGIN_NOT_ALLOWED: "CONTROL_UI_ORIGIN_NOT_ALLOWED",
   CONTROL_UI_DEVICE_IDENTITY_REQUIRED: "CONTROL_UI_DEVICE_IDENTITY_REQUIRED",
   DEVICE_IDENTITY_REQUIRED: "DEVICE_IDENTITY_REQUIRED",
   DEVICE_AUTH_INVALID: "DEVICE_AUTH_INVALID",
@@ -125,8 +128,7 @@ export function readConnectErrorRecoveryAdvice(details: unknown): ConnectErrorRe
   };
   const canRetryWithDeviceToken =
     typeof raw.canRetryWithDeviceToken === "boolean" ? raw.canRetryWithDeviceToken : undefined;
-  const normalizedNextStep =
-    typeof raw.recommendedNextStep === "string" ? raw.recommendedNextStep.trim() : "";
+  const normalizedNextStep = normalizeOptionalString(raw.recommendedNextStep) ?? "";
   const recommendedNextStep = CONNECT_RECOVERY_NEXT_STEP_VALUES.has(
     normalizedNextStep as ConnectRecoveryNextStep,
   )

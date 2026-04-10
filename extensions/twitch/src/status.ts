@@ -4,7 +4,7 @@
  * Detects and reports configuration issues for Twitch accounts.
  */
 
-import type { ChannelStatusIssue } from "openclaw/plugin-sdk/twitch";
+import type { ChannelStatusIssue } from "../runtime-api.js";
 import { getAccountConfig } from "./config.js";
 import { resolveTwitchToken } from "./token.js";
 import type { ChannelAccountSnapshot } from "./types.js";
@@ -86,7 +86,7 @@ export function collectTwitchStatusIssues(
     }
 
     const tokenResolution = cfg
-      ? resolveTwitchToken(cfg as Parameters<typeof resolveTwitchToken>[0], { accountId })
+      ? resolveTwitchToken(cfg, { accountId })
       : { token: "", source: "none" };
     if (account && isAccountConfigured(account, tokenResolution.token)) {
       if (account.accessToken?.startsWith("oauth:")) {

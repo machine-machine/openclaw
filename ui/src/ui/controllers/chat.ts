@@ -1,8 +1,14 @@
 import { resetToolStream } from "../app-tool-stream.ts";
 import { extractText } from "../chat/message-extract.ts";
+import { formatConnectError } from "../connect-error.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
+import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 import type { ChatAttachment } from "../ui-types.ts";
 import { generateUUID } from "../uuid.ts";
+import {
+  formatMissingOperatorReadScopeMessage,
+  isMissingOperatorReadScopeError,
+} from "./scope-errors.ts";
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
 
@@ -15,7 +21,7 @@ function isAssistantSilentReply(message: unknown): boolean {
     return false;
   }
   const entry = message as Record<string, unknown>;
-  const role = typeof entry.role === "string" ? entry.role.toLowerCase() : "";
+  const role = normalizeLowercaseStringOrEmpty(entry.role);
   if (role !== "assistant") {
     return false;
   }
@@ -86,7 +92,13 @@ export async function loadChatHistory(state: ChatState) {
     state.chatStream = null;
     state.chatStreamStartedAt = null;
   } catch (err) {
-    state.lastError = String(err);
+    if (isMissingOperatorReadScopeError(err)) {
+      state.chatMessages = [];
+      state.chatThinkingLevel = null;
+      state.lastError = formatMissingOperatorReadScopeMessage("existing chat history");
+    } else {
+      state.lastError = String(err);
+    }
   } finally {
     state.chatLoading = false;
   }
@@ -117,7 +129,7 @@ function normalizeAssistantMessage(
   const candidate = message as Record<string, unknown>;
   const roleValue = candidate.role;
   if (typeof roleValue === "string") {
-    const role = options.roleCaseSensitive ? roleValue : roleValue.toLowerCase();
+    const role = options.roleCaseSensitive ? roleValue : normalizeLowercaseStringOrEmpty(roleValue);
     if (role !== "assistant") {
       return null;
     }
@@ -223,7 +235,7 @@ export async function sendChatMessage(
     });
     return runId;
   } catch (err) {
-    const error = String(err);
+    const error = formatConnectError(err);
     state.chatRunId = null;
     state.chatStream = null;
     state.chatStreamStartedAt = null;
@@ -254,7 +266,7 @@ export async function abortChatRun(state: ChatState): Promise<boolean> {
     );
     return true;
   } catch (err) {
-    state.lastError = String(err);
+    state.lastError = formatConnectError(err);
     return false;
   }
 }
@@ -284,10 +296,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   if (payload.state === "delta") {
     const next = extractText(payload.message);
     if (typeof next === "string" && !isSilentReplyStream(next)) {
-      const current = state.chatStream ?? "";
-      if (!current || next.length >= current.length) {
-        state.chatStream = next;
-      }
+      state.chatStream = next;
     }
   } else if (payload.state === "final") {
     const finalMessage = normalizeFinalAssistantMessage(payload.message);

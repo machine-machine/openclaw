@@ -1,4 +1,5 @@
 import { ConnectErrorDetailCodes } from "../../../../src/gateway/protocol/connect-error-details.js";
+import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 
 const AUTH_REQUIRED_CODES = new Set<string>([
   ConnectErrorDetailCodes.AUTH_REQUIRED,
@@ -26,6 +27,8 @@ const INSECURE_CONTEXT_CODES = new Set<string>([
   ConnectErrorDetailCodes.DEVICE_IDENTITY_REQUIRED,
 ]);
 
+type AuthHintKind = "required" | "failed";
+
 /** Whether the overview should show device-pairing guidance for this error. */
 export function shouldShowPairingHint(
   connected: boolean,
@@ -38,33 +41,37 @@ export function shouldShowPairingHint(
   if (lastErrorCode === ConnectErrorDetailCodes.PAIRING_REQUIRED) {
     return true;
   }
-  return lastError.toLowerCase().includes("pairing required");
+  return normalizeLowercaseStringOrEmpty(lastError).includes("pairing required");
 }
 
-export function shouldShowAuthHint(
-  connected: boolean,
-  lastError: string | null,
-  lastErrorCode?: string | null,
-): boolean {
-  if (connected || !lastError) {
-    return false;
+/**
+ * Return the overview auth hint to show, if any.
+ *
+ * Keep fallback string matching narrow so generic "connect failed" close reasons
+ * do not get misclassified as token/password problems.
+ */
+export function resolveAuthHintKind(params: {
+  connected: boolean;
+  lastError: string | null;
+  lastErrorCode?: string | null;
+  hasToken: boolean;
+  hasPassword: boolean;
+}): AuthHintKind | null {
+  if (params.connected || !params.lastError) {
+    return null;
   }
-  if (lastErrorCode) {
-    return AUTH_FAILURE_CODES.has(lastErrorCode);
+  if (params.lastErrorCode) {
+    if (!AUTH_FAILURE_CODES.has(params.lastErrorCode)) {
+      return null;
+    }
+    return AUTH_REQUIRED_CODES.has(params.lastErrorCode) ? "required" : "failed";
   }
-  const lower = lastError.toLowerCase();
-  return lower.includes("unauthorized") || lower.includes("connect failed");
-}
 
-export function shouldShowAuthRequiredHint(
-  hasToken: boolean,
-  hasPassword: boolean,
-  lastErrorCode?: string | null,
-): boolean {
-  if (lastErrorCode) {
-    return AUTH_REQUIRED_CODES.has(lastErrorCode);
+  const lower = normalizeLowercaseStringOrEmpty(params.lastError);
+  if (!lower.includes("unauthorized")) {
+    return null;
   }
-  return !hasToken && !hasPassword;
+  return !params.hasToken && !params.hasPassword ? "required" : "failed";
 }
 
 export function shouldShowInsecureContextHint(
@@ -78,6 +85,6 @@ export function shouldShowInsecureContextHint(
   if (lastErrorCode) {
     return INSECURE_CONTEXT_CODES.has(lastErrorCode);
   }
-  const lower = lastError.toLowerCase();
+  const lower = normalizeLowercaseStringOrEmpty(lastError);
   return lower.includes("secure context") || lower.includes("device identity required");
 }
