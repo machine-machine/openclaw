@@ -27,7 +27,7 @@ const channel = "feishu" as const;
 type ScopedFeishuConfig = Partial<FeishuConfig> & Partial<FeishuAccountConfig>;
 
 function getScopedFeishuConfig(cfg: OpenClawConfig, accountId: string): ScopedFeishuConfig {
-  const feishuCfg = cfg.channels?.feishu;
+  const feishuCfg = cfg.channels?.feishu as FeishuConfig | undefined;
   if (accountId === DEFAULT_ACCOUNT_ID) {
     return feishuCfg ?? {};
   }
@@ -39,7 +39,7 @@ function patchFeishuConfig(
   accountId: string,
   patch: Record<string, unknown>,
 ): OpenClawConfig {
-  const feishuCfg = cfg.channels?.feishu;
+  const feishuCfg = cfg.channels?.feishu as FeishuConfig | undefined;
   if (accountId === DEFAULT_ACCOUNT_ID) {
     return patchTopLevelChannelConfigSection({
       cfg,
@@ -91,7 +91,7 @@ function setFeishuGroupAllowFrom(
 }
 
 function isFeishuConfigured(cfg: OpenClawConfig, accountId?: string | null): boolean {
-  const feishuCfg = ((cfg.channels?.feishu) ?? {}) as FeishuConfig;
+  const feishuCfg = ((cfg.channels?.feishu as FeishuConfig | undefined) ?? {}) as FeishuConfig;
   const resolvedAccountId = normalizeString(accountId) ?? resolveDefaultFeishuAccountId(cfg);
 
   const isAppIdConfigured = (value: unknown): boolean => {

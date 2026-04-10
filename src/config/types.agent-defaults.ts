@@ -1,4 +1,3 @@
-import type { ChannelId } from "../channels/plugins/types.js";
 import type { AgentModelConfig, AgentSandboxConfig } from "./types.agents-shared.js";
 import type {
   BlockStreamingChunkConfig,
@@ -79,6 +78,10 @@ export type CliBackendConfig = {
   sessionIdFields?: string[];
   /** Flag used to pass system prompt. */
   systemPromptArg?: string;
+  /** Config override flag used to pass a system prompt file (e.g. -c). */
+  systemPromptFileConfigArg?: string;
+  /** Config override key used to pass a system prompt file. */
+  systemPromptFileConfigKey?: string;
   /** System prompt behavior (append vs replace). */
   systemPromptMode?: "append" | "replace";
   /** When to send system prompt. */
@@ -268,7 +271,7 @@ export type AgentDefaultsConfig = {
     /** Session key for heartbeat runs ("main" or explicit session key). */
     session?: string;
     /** Delivery target ("last", "none", or a channel id). */
-    target?: ChannelId;
+    target?: string;
     /** Direct/DM delivery policy. Default: "allow". */
     directPolicy?: "allow" | "block";
     /** Optional delivery override (E.164 for WhatsApp, chat id for Telegram). Supports :topic:NNN suffix for Telegram topics. */

@@ -166,7 +166,7 @@ export function buildAnthropicCliMigrationResult(
   const rewrittenModels = rewriteModelEntryMap(defaults?.models);
   const existingModels = (rewrittenModels.value ??
     defaults?.models ??
-    {});
+    {}) as NonNullable<AgentDefaultsModels>;
   const nextModels = seedClaudeCliAllowlist(existingModels);
   const defaultModel = rewrittenModel.primary ?? CLAUDE_CLI_DEFAULT_MODEL_REF;
 

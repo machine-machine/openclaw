@@ -9,9 +9,11 @@ import {
 } from "../config/sessions/store.js";
 import { captureEnv } from "../test-utils/env.js";
 
-const { announceSpy } = vi.hoisted(() => ({
+const hoisted = vi.hoisted(() => ({
   announceSpy: vi.fn(async () => true),
+  registryPath: undefined as string | undefined,
 }));
+const { announceSpy } = hoisted;
 vi.mock("./subagent-announce.js", () => ({
   runSubagentAnnounceFlow: announceSpy,
 }));
@@ -19,6 +21,40 @@ vi.mock("./subagent-announce.js", () => ({
 vi.mock("./subagent-orphan-recovery.js", () => ({
   scheduleOrphanRecovery: vi.fn(),
 }));
+
+vi.mock("./subagent-registry.store.js", async () => {
+  const actual = await vi.importActual<typeof import("./subagent-registry.store.js")>(
+    "./subagent-registry.store.js",
+  );
+  const fsSync = await import("node:fs");
+  const pathSync = await import("node:path");
+  const resolvePath = () => hoisted.registryPath ?? actual.resolveSubagentRegistryPath();
+  return {
+    ...actual,
+    resolveSubagentRegistryPath: resolvePath,
+    loadSubagentRegistryFromDisk: () => {
+      try {
+        const parsed = JSON.parse(fsSync.readFileSync(resolvePath(), "utf8")) as {
+          runs?: Record<string, import("./subagent-registry.types.js").SubagentRunRecord>;
+        };
+        return new Map(Object.entries(parsed.runs ?? {}));
+      } catch {
+        return new Map();
+      }
+    },
+    saveSubagentRegistryToDisk: (
+      runs: Map<string, import("./subagent-registry.types.js").SubagentRunRecord>,
+    ) => {
+      const pathname = resolvePath();
+      fsSync.mkdirSync(pathSync.dirname(pathname), { recursive: true });
+      fsSync.writeFileSync(
+        pathname,
+        `${JSON.stringify({ version: 2, runs: Object.fromEntries(runs) }, null, 2)}\n`,
+        "utf8",
+      );
+    },
+  };
+});
 
 let mod: typeof import("./subagent-registry.js");
 let callGatewayModule: typeof import("../gateway/call.js");
@@ -71,6 +107,7 @@ describe("subagent registry persistence resume", () => {
   };
 
   beforeAll(async () => {
+    vi.resetModules();
     mod = await import("./subagent-registry.js");
     callGatewayModule = await import("../gateway/call.js");
     agentEventsModule = await import("../infra/agent-events.js");
@@ -78,7 +115,19 @@ describe("subagent registry persistence resume", () => {
 
   beforeEach(async () => {
     announceSpy.mockClear();
-    mod.__testing.setDepsForTest();
+    mod.__testing.setDepsForTest({
+      cleanupBrowserSessionsForLifecycleEnd: vi.fn(async () => {}),
+      ensureContextEnginesInitialized: vi.fn(),
+      ensureRuntimePluginsLoaded: vi.fn(),
+      loadConfig: vi.fn(() => ({})),
+      resolveAgentTimeoutMs: vi.fn(() => 100),
+      resolveContextEngine: vi.fn(async () => ({
+        info: { id: "test", name: "Test", version: "0.0.1" },
+        ingest: vi.fn(async () => ({ ingested: false })),
+        assemble: vi.fn(async ({ messages }) => ({ messages, estimatedTokens: 0 })),
+        compact: vi.fn(async () => ({ ok: false, compacted: false })),
+      })),
+    });
     mod.resetSubagentRegistryForTests({ persist: false });
     vi.mocked(callGatewayModule.callGateway).mockReset();
     vi.mocked(callGatewayModule.callGateway).mockResolvedValue({
@@ -100,12 +149,15 @@ describe("subagent registry persistence resume", () => {
       await fs.rm(tempStateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       tempStateDir = null;
     }
+    hoisted.registryPath = undefined;
     envSnapshot.restore();
   });
 
   it("persists runs to disk and resumes after restart", async () => {
     tempStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-subagent-"));
     process.env.OPENCLAW_STATE_DIR = tempStateDir;
+    const registryPath = path.join(tempStateDir, "subagents", "runs.json");
+    hoisted.registryPath = registryPath;
 
     let releaseInitialWait:
       | ((value: { status: "ok"; startedAt: number; endedAt: number }) => void)
@@ -137,7 +189,6 @@ describe("subagent registry persistence resume", () => {
       sessionId: "sess-test",
     });
 
-    const registryPath = path.join(tempStateDir, "subagents", "runs.json");
     const raw = await fs.readFile(registryPath, "utf8");
     const parsed = JSON.parse(raw) as { runs?: Record<string, unknown> };
     expect(parsed.runs && Object.keys(parsed.runs)).toContain("run-1");

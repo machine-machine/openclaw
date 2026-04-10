@@ -1,7 +1,13 @@
 import { isBlockedHostnameOrIp } from "openclaw/plugin-sdk/ssrf-runtime";
 import type { Mock } from "vitest";
 import { afterEach, beforeEach, vi } from "vitest";
-import { _setFetchGuardForTesting, normalizeBlueBubblesServerUrl } from "./types.js";
+import {
+  normalizeBlueBubblesAccountsMap,
+  normalizeBlueBubblesPrivateNetworkAliases,
+  resolveBlueBubblesEffectiveAllowPrivateNetworkFromConfig,
+  resolveBlueBubblesPrivateNetworkConfigValue as resolveBlueBubblesPrivateNetworkConfigValueFromConfig,
+} from "./accounts-normalization.js";
+import { _setFetchGuardForTesting } from "./types.js";
 
 export const BLUE_BUBBLES_PRIVATE_API_STATUS = {
   enabled: true,

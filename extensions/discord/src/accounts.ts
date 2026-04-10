@@ -34,7 +34,7 @@ export function mergeDiscordAccountConfig(
   accountId: string,
 ): DiscordAccountConfig {
   return resolveMergedAccountConfig<DiscordAccountConfig>({
-    channelConfig: cfg.channels?.discord,
+    channelConfig: cfg.channels?.discord as DiscordAccountConfig | undefined,
     accounts: cfg.channels?.discord?.accounts as
       | Record<string, Partial<DiscordAccountConfig>>
       | undefined,

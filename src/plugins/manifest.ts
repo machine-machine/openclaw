@@ -7,6 +7,10 @@ import { matchBoundaryFileOpenFailure, openBoundaryFileSync } from "../infra/bou
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { normalizeTrimmedStringList } from "../shared/string-normalization.js";
 import { isRecord } from "../utils.js";
+import {
+  normalizeManifestCommandAliases,
+  type PluginManifestCommandAlias,
+} from "./manifest-command-aliases.js";
 import type { PluginConfigUiHint, PluginKind } from "./types.js";
 
 export const PLUGIN_MANIFEST_FILENAME = "openclaw.plugin.json";
@@ -97,14 +101,26 @@ export type PluginManifest = {
   channels?: string[];
   providers?: string[];
   /**
+   * Optional lightweight module that exports provider plugin metadata for
+   * auth/catalog discovery. It should not import the full plugin runtime.
+   */
+  providerDiscoveryEntry?: string;
+  /**
    * Cheap model-family ownership metadata used before plugin runtime loads.
    * Use this for shorthand model refs that omit an explicit provider prefix.
    */
   modelSupport?: PluginManifestModelSupport;
   /** Cheap startup activation lookup for plugin-owned CLI inference backends. */
   cliBackends?: string[];
+  /**
+   * Plugin-owned command aliases that should resolve to this plugin during
+   * config diagnostics before runtime loads.
+   */
+  commandAliases?: PluginManifestCommandAlias[];
   /** Cheap provider-auth env lookup without booting plugin runtime. */
   providerAuthEnvVars?: Record<string, string[]>;
+  /** Provider ids that should reuse another provider id for auth lookup. */
+  providerAuthAliases?: Record<string, string>;
   /** Cheap channel env lookup without booting plugin runtime. */
   channelEnvVars?: Record<string, string[]>;
   /**
@@ -194,6 +210,22 @@ function normalizeStringListRecord(value: unknown): Record<string, string[]> | u
       continue;
     }
     normalized[providerId] = values;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const normalized: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = normalizeOptionalString(rawKey) ?? "";
+    const value = normalizeOptionalString(rawValue) ?? "";
+    if (!key || !value) {
+      continue;
+    }
+    normalized[key] = value;
   }
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
@@ -513,9 +545,12 @@ export function loadPluginManifest(
   const version = normalizeOptionalString(raw.version);
   const channels = normalizeTrimmedStringList(raw.channels);
   const providers = normalizeTrimmedStringList(raw.providers);
+  const providerDiscoveryEntry = normalizeOptionalString(raw.providerDiscoveryEntry);
   const modelSupport = normalizeManifestModelSupport(raw.modelSupport);
   const cliBackends = normalizeTrimmedStringList(raw.cliBackends);
+  const commandAliases = normalizeManifestCommandAliases(raw.commandAliases);
   const providerAuthEnvVars = normalizeStringListRecord(raw.providerAuthEnvVars);
+  const providerAuthAliases = normalizeStringRecord(raw.providerAuthAliases);
   const channelEnvVars = normalizeStringListRecord(raw.channelEnvVars);
   const providerAuthChoices = normalizeProviderAuthChoices(raw.providerAuthChoices);
   const skills = normalizeTrimmedStringList(raw.skills);
@@ -541,9 +576,12 @@ export function loadPluginManifest(
       kind,
       channels,
       providers,
+      providerDiscoveryEntry,
       modelSupport,
       cliBackends,
+      commandAliases,
       providerAuthEnvVars,
+      providerAuthAliases,
       channelEnvVars,
       providerAuthChoices,
       skills,

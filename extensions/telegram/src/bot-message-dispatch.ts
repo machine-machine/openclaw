@@ -36,7 +36,7 @@ import {
   resolveMarkdownTableMode,
   resolveSessionStoreEntry,
 } from "./bot-message-dispatch.runtime.js";
-import type { TelegramBotOptions } from "./bot.js";
+import type { TelegramBotOptions } from "./bot.types.js";
 import { deliverReplies, emitInternalMessageSentHook } from "./bot/delivery.js";
 import type { TelegramStreamMode } from "./bot/types.js";
 import type { TelegramInlineButtons } from "./button-types.js";
@@ -930,7 +930,7 @@ export const dispatchTelegramMessage = async ({
     const userMessage = (ctxPayload.RawBody ?? ctxPayload.Body ?? "").slice(0, 500);
     if (userMessage.trim()) {
       const agentDir = resolveAgentDir(cfg, route.agentId);
-      const directConfig = !isGroup ? (groupConfig) : undefined;
+      const directConfig = !isGroup ? (groupConfig as TelegramDirectConfig | undefined) : undefined;
       const directAutoTopicLabel = directConfig?.autoTopicLabel;
       const accountAutoTopicLabel = telegramCfg?.autoTopicLabel;
       const autoTopicConfig = resolveAutoTopicLabelConfig(

@@ -5,7 +5,7 @@ export function makeBaseReq(
   method: string,
   opts: { headers?: Record<string, string>; url?: string } = {},
 ): IncomingMessage & { destroyed: boolean } {
-  const req = new EventEmitter();
+  const req = new EventEmitter() as IncomingMessage & { destroyed: boolean };
   req.method = method;
   req.headers = opts.headers ?? {};
   req.url = opts.url ?? "/webhook/synology";

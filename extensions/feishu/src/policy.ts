@@ -127,7 +127,7 @@ export function resolveFeishuReplyPolicy(params: {
     return { requireMention: false };
   }
 
-  const feishuCfg = params.cfg.channels?.feishu;
+  const feishuCfg = params.cfg.channels?.feishu as FeishuConfig | undefined;
   const resolvedCfg = resolveMergedAccountConfig<FeishuConfig>({
     channelConfig: feishuCfg,
     accounts: feishuCfg?.accounts as Record<string, Partial<FeishuConfig>> | undefined,

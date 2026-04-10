@@ -22,6 +22,7 @@ import type { PluginRegistry } from "../../plugins/registry.js";
 import { getActivePluginChannelRegistry } from "../../plugins/runtime.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import type { WizardPrompter } from "../../wizard/prompts.js";
+import { getTrustedChannelPluginCatalogEntry } from "./trusted-catalog.js";
 
 type InstallChoice = "npm" | "local" | "skip";
 
@@ -274,7 +275,8 @@ function resolveScopedChannelPluginId(params: {
     return explicitPluginId;
   }
   return (
-    getChannelPluginCatalogEntry(params.channel, {
+    getTrustedChannelPluginCatalogEntry(params.channel, {
+      cfg: params.cfg,
       workspaceDir: params.workspaceDir,
     })?.pluginId ?? resolveUniqueManifestScopedChannelPluginId(params)
   );

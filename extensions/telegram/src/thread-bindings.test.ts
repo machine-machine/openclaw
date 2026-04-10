@@ -3,7 +3,6 @@ import os from "node:os";
 import path from "node:path";
 import { getSessionBindingService } from "openclaw/plugin-sdk/conversation-runtime";
 import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
-import { loadBundledPluginTestApiSync } from "openclaw/plugin-sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { importFreshModule } from "../../../test/helpers/import-fresh.js";
 import {

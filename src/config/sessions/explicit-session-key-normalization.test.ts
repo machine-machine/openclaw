@@ -1,21 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { MsgContext } from "../../auto-reply/templating.js";
-import type { ChannelPlugin } from "../../channels/plugins/types.js";
-import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
-import {
-  createChannelTestPluginBase,
-  createTestRegistry,
-} from "../../test-utils/channel-plugins.js";
+import { describe, expect, it } from "vitest";
 import { normalizeExplicitSessionKey } from "./explicit-session-key-normalization.js";
+import { installDiscordSessionKeyNormalizerFixture, makeCtx } from "./session-key.test-helpers.js";
 
-function makeCtx(overrides: Partial<MsgContext>): MsgContext {
-  return {
-    Body: "",
-    From: "",
-    To: "",
-    ...overrides,
-  } as MsgContext;
-}
+installDiscordSessionKeyNormalizerFixture();
 
 beforeEach(() => {
   const discordPlugin: ChannelPlugin = {

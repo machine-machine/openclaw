@@ -1,12 +1,15 @@
 import type { Command } from "commander";
+export type { GatewayRpcOpts } from "./gateway-rpc.types.js";
+import type { GatewayRpcOpts } from "./gateway-rpc.types.js";
 
-export type GatewayRpcOpts = {
-  url?: string;
-  token?: string;
-  timeout?: string;
-  expectFinal?: boolean;
-  json?: boolean;
-};
+type GatewayRpcRuntimeModule = typeof import("./gateway-rpc.runtime.js");
+
+let gatewayRpcRuntimePromise: Promise<GatewayRpcRuntimeModule> | undefined;
+
+async function loadGatewayRpcRuntime(): Promise<GatewayRpcRuntimeModule> {
+  gatewayRpcRuntimePromise ??= import("./gateway-rpc.runtime.js");
+  return gatewayRpcRuntimePromise;
+}
 
 type GatewayRpcRuntimeModule = typeof import("./gateway-rpc.runtime.js");
 

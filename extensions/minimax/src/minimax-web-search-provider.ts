@@ -298,7 +298,7 @@ export function createMiniMaxWebSearchProvider(): WebSearchProviderPlugin {
           "minimax",
           resolveProviderWebSearchPluginConfig(ctx.config, "minimax"),
           { mirrorApiKeyToTopLevel: true },
-        ),
+        ) as SearchConfigRecord | undefined,
         ctx.config as Record<string, unknown> | undefined,
       ),
   };

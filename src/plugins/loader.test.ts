@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
-import { clearInternalHooks, getRegisteredEventKeys } from "../hooks/internal-hooks.js";
+import {
+  clearInternalHooks,
+  createInternalHookEvent,
+  getRegisteredEventKeys,
+  triggerInternalHook,
+} from "../hooks/internal-hooks.js";
 import { emitDiagnosticEvent } from "../infra/diagnostic-events.js";
 import { withEnv } from "../test-utils/env.js";
 import { clearPluginCommands, getPluginCommandSpecs } from "./command-registry-state.js";
@@ -1483,6 +1488,49 @@ module.exports = { id: "throws-after-import", register() {} };`,
     clearInternalHooks();
   });
 
+  it("replaces prior plugin hook registrations on activating reloads", async () => {
+    useNoBundledPlugins();
+    const plugin = writePlugin({
+      id: "internal-hook-reload",
+      filename: "internal-hook-reload.cjs",
+      body: `module.exports = {
+        id: "internal-hook-reload",
+        register(api) {
+          api.registerHook(
+            "gateway:startup",
+            (event) => {
+              event.messages.push("reload-hook-fired");
+            },
+            { name: "reload-hook" },
+          );
+        },
+      };`,
+    });
+
+    clearInternalHooks();
+
+    const loadOptions = {
+      cache: false,
+      workspaceDir: plugin.dir,
+      config: {
+        plugins: {
+          load: { paths: [plugin.file] },
+          allow: ["internal-hook-reload"],
+        },
+      },
+      onlyPluginIds: ["internal-hook-reload"],
+    };
+
+    loadOpenClawPlugins(loadOptions);
+    loadOpenClawPlugins(loadOptions);
+
+    const event = createInternalHookEvent("gateway", "startup", "gateway:startup");
+    await triggerInternalHook(event);
+    expect(event.messages.filter((message) => message === "reload-hook-fired")).toHaveLength(1);
+
+    clearInternalHooks();
+  });
+
   it("can scope bundled provider loads to deepseek without hanging", () => {
     resetPluginLoaderTestStateForTest();
 
@@ -2413,6 +2461,63 @@ module.exports = { id: "throws-after-import", register() {} };`,
       });
       return loadRegistryFromAllowedPlugins([first, second]);
     });
+  });
+
+  it("allows the same plugin to register the same service id twice", () => {
+    useNoBundledPlugins();
+    const plugin = writePlugin({
+      id: "service-owner-self",
+      filename: "service-owner-self.cjs",
+      body: `module.exports = { id: "service-owner-self", register(api) {
+  api.registerService({ id: "shared-service", start() {} });
+  api.registerService({ id: "shared-service", start() {} });
+} };`,
+    });
+
+    const registry = loadRegistryFromSinglePlugin({
+      plugin,
+      pluginConfig: {
+        allow: ["service-owner-self"],
+      },
+      {
+        label: "rejects plugin context engine ids reserved by core",
+        pluginId: "context-engine-core-collision",
+        body: `module.exports = { id: "context-engine-core-collision", register(api) {
+  api.registerContextEngine("legacy", () => ({}));
+} };`,
+        assert: (registry: ReturnType<typeof loadOpenClawPlugins>) => {
+          expectRegistryErrorDiagnostic({
+            registry,
+            pluginId: "context-engine-core-collision",
+            message: "context engine id reserved by core: legacy",
+          });
+        },
+      },
+      {
+        label: "requires plugin CLI registrars to declare explicit command roots",
+        pluginId: "cli-missing-metadata",
+        body: `module.exports = { id: "cli-missing-metadata", register(api) {
+  api.registerCli(() => {});
+} };`,
+        assert: (registry: ReturnType<typeof loadOpenClawPlugins>) => {
+          expect(registry.cliRegistrars).toHaveLength(0);
+          expectRegistryErrorDiagnostic({
+            registry,
+            pluginId: "cli-missing-metadata",
+            message: "cli registration missing explicit commands metadata",
+          });
+        },
+      },
+    ] as const;
+
+    expect(registry.services.filter((entry) => entry.service.id === "shared-service")).toHaveLength(
+      1,
+    );
+    expect(
+      registry.diagnostics.some((diag) =>
+        String(diag.message).includes("service already registered: shared-service"),
+      ),
+    ).toBe(false);
   });
 
   it("rewrites removed registerHttpHandler failures into migration diagnostics", () => {

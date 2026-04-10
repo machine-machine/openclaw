@@ -463,7 +463,7 @@ export function createKimiWebSearchProvider(): WebSearchProviderPlugin {
           ctx.searchConfig as SearchConfigRecord | undefined,
           "kimi",
           resolveProviderWebSearchPluginConfig(ctx.config, "moonshot"),
-        ),
+        ) as SearchConfigRecord | undefined,
         ctx.config,
       ),
   };

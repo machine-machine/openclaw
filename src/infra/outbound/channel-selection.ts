@@ -34,7 +34,23 @@ function resolveKnownChannel(value?: string | null): MessageChannelId | undefine
   if (!isKnownChannel(normalized)) {
     return undefined;
   }
-  return normalized as MessageChannelId;
+  return normalized;
+}
+
+function resolveAvailableKnownChannel(params: {
+  cfg: OpenClawConfig;
+  value?: string | null;
+}): MessageChannelId | undefined {
+  const normalized = resolveKnownChannel(params.value);
+  if (!normalized) {
+    return undefined;
+  }
+  return resolveOutboundChannelPlugin({
+    channel: normalized,
+    cfg: params.cfg,
+  })
+    ? normalized
+    : undefined;
 }
 
 function resolveAvailableKnownChannel(params: {

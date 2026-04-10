@@ -71,7 +71,7 @@ function buildSseEventSourceFetch(headers: Record<string, string>): SseEventSour
     return fetchWithUndici(url, {
       ...(init as RequestInit),
       headers: { ...sdkHeaders, ...headers },
-    });
+    }) as ReturnType<SseEventSourceFetch>;
   };
 }
 

@@ -53,15 +53,15 @@ export function updateIrcAccountConfig(
     patch,
     ensureChannelEnabled: false,
     ensureAccountEnabled: false,
-  });
+  }) as CoreConfig;
 }
 
 export function setIrcDmPolicy(cfg: CoreConfig, dmPolicy: DmPolicy): CoreConfig {
-  return setIrcTopLevelDmPolicy(cfg, dmPolicy);
+  return setIrcTopLevelDmPolicy(cfg, dmPolicy) as CoreConfig;
 }
 
 export function setIrcAllowFrom(cfg: CoreConfig, allowFrom: string[]): CoreConfig {
-  return setIrcTopLevelAllowFrom(cfg, allowFrom);
+  return setIrcTopLevelAllowFrom(cfg, allowFrom) as CoreConfig;
 }
 
 export function setIrcNickServ(
@@ -134,6 +134,6 @@ export const ircSetupAdapter: ChannelSetupAdapter = {
       channelKey: channel,
       accountId,
       patch,
-    });
+    }) as CoreConfig;
   },
 };

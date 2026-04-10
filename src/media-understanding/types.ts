@@ -50,6 +50,31 @@ export type MediaUnderstandingDecision = {
   attachments: MediaUnderstandingAttachmentDecision[];
 };
 
+export type MediaUnderstandingProviderRequestAuthOverride =
+  | { mode: "provider-default" }
+  | { mode: "authorization-bearer"; token: string }
+  | { mode: "header"; headerName: string; value: string; prefix?: string };
+
+export type MediaUnderstandingProviderRequestTlsOverride = {
+  ca?: string;
+  cert?: string;
+  key?: string;
+  passphrase?: string;
+  serverName?: string;
+  insecureSkipVerify?: boolean;
+};
+
+export type MediaUnderstandingProviderRequestProxyOverride =
+  | { mode: "env-proxy"; tls?: MediaUnderstandingProviderRequestTlsOverride }
+  | { mode: "explicit-proxy"; url: string; tls?: MediaUnderstandingProviderRequestTlsOverride };
+
+export type MediaUnderstandingProviderRequestTransportOverrides = {
+  headers?: Record<string, string>;
+  auth?: MediaUnderstandingProviderRequestAuthOverride;
+  proxy?: MediaUnderstandingProviderRequestProxyOverride;
+  tls?: MediaUnderstandingProviderRequestTlsOverride;
+};
+
 export type AudioTranscriptionRequest = {
   buffer: Buffer;
   fileName: string;
@@ -57,7 +82,7 @@ export type AudioTranscriptionRequest = {
   apiKey: string;
   baseUrl?: string;
   headers?: Record<string, string>;
-  request?: ProviderRequestTransportOverrides;
+  request?: MediaUnderstandingProviderRequestTransportOverrides;
   model?: string;
   language?: string;
   prompt?: string;
@@ -78,7 +103,7 @@ export type VideoDescriptionRequest = {
   apiKey: string;
   baseUrl?: string;
   headers?: Record<string, string>;
-  request?: ProviderRequestTransportOverrides;
+  request?: MediaUnderstandingProviderRequestTransportOverrides;
   model?: string;
   prompt?: string;
   timeoutMs: number;

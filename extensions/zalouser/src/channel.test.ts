@@ -23,7 +23,7 @@ vi.mock("./qr-temp-file.js", () => ({
 }));
 
 vi.mock("./send.js", async () => {
-  const actual = (await vi.importActual("./send.js"));
+  const actual = (await vi.importActual("./send.js")) as Record<string, unknown>;
   return {
     ...actual,
     sendMessageZalouser: vi.fn(async () => ({ ok: true, messageId: "mid-1" })),

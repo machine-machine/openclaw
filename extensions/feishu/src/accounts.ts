@@ -146,7 +146,7 @@ export function resolveDefaultFeishuAccountSelection(cfg: ClawdbotConfig): {
   source: FeishuDefaultAccountSelectionSource;
 } {
   const preferred = normalizeOptionalAccountId(
-    (cfg.channels?.feishu)?.defaultAccount,
+    (cfg.channels?.feishu as FeishuConfig | undefined)?.defaultAccount,
   );
   if (preferred) {
     return {
@@ -179,7 +179,7 @@ export function resolveDefaultFeishuAccountId(cfg: ClawdbotConfig): string {
  * Account-specific fields override top-level fields.
  */
 function mergeFeishuAccountConfig(cfg: ClawdbotConfig, accountId: string): FeishuConfig {
-  const feishuCfg = cfg.channels?.feishu;
+  const feishuCfg = cfg.channels?.feishu as FeishuConfig | undefined;
   return resolveMergedAccountConfig<FeishuConfig>({
     channelConfig: feishuCfg,
     accounts: feishuCfg?.accounts as Record<string, Partial<FeishuConfig>> | undefined,
@@ -266,7 +266,7 @@ function buildResolvedFeishuAccount(params: {
   const enabled = baseEnabled && accountEnabled;
   const baseCreds = resolveFeishuBaseCredentials(merged, params.baseMode);
   const eventSecrets = resolveFeishuEventSecrets(merged, params.eventSecretMode);
-  const accountName = (merged).name;
+  const accountName = (merged as FeishuAccountConfig).name;
 
   return {
     accountId,

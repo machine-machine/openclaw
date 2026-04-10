@@ -54,6 +54,7 @@ import {
 import type { AppViewState } from "./app-view-state.ts";
 import { normalizeAssistantIdentity } from "./assistant-identity.ts";
 import { exportChatMarkdown } from "./chat/export.ts";
+import type { ChatSideResult } from "./chat/side-result.ts";
 import {
   loadToolsEffective as loadToolsEffectiveInternal,
   refreshVisibleToolsEffectiveForCurrentSession as refreshVisibleToolsEffectiveForCurrentSessionInternal,
@@ -167,6 +168,7 @@ export class OpenClawApp extends LitElement {
   @state() chatStream: string | null = null;
   @state() chatStreamStartedAt: number | null = null;
   @state() chatRunId: string | null = null;
+  @state() chatSideResult: ChatSideResult | null = null;
   @state() compactionStatus: CompactionStatus | null = null;
   @state() fallbackStatus: FallbackStatus | null = null;
   @state() chatAvatarUrl: string | null = null;
@@ -227,6 +229,7 @@ export class OpenClawApp extends LitElement {
   @state() dreamingStatus: DreamingStatus | null = null;
   @state() dreamingModeSaving = false;
   @state() dreamDiaryLoading = false;
+  @state() dreamDiaryActionLoading = false;
   @state() dreamDiaryError: string | null = null;
   @state() dreamDiaryPath: string | null = null;
   @state() dreamDiaryContent: string | null = null;
@@ -486,6 +489,7 @@ export class OpenClawApp extends LitElement {
   private toolStreamById = new Map<string, ToolStreamEntry>();
   private toolStreamOrder: string[] = [];
   refreshSessionsAfterChat = new Set<string>();
+  chatSideResultTerminalRuns = new Set<string>();
   basePath = "";
   private popStateHandler = () =>
     onPopStateInternal(this as unknown as Parameters<typeof onPopStateInternal>[0]);

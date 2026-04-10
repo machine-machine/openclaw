@@ -1,4 +1,15 @@
 import fsPromises from "node:fs/promises";
+import { loadConfig } from "openclaw/plugin-sdk/browser-config-runtime";
+import { withTimeout } from "openclaw/plugin-sdk/browser-node-runtime";
+import { detectMime } from "openclaw/plugin-sdk/browser-setup-tools";
+import { redactCdpUrl } from "../browser/cdp.helpers.js";
+import { resolveBrowserConfig } from "../browser/config.js";
+import {
+  isPersistentBrowserProfileMutation,
+  normalizeBrowserRequestPath,
+  resolveRequestedBrowserProfile,
+} from "../browser/request-policy.js";
+import { createBrowserRouteDispatcher } from "../browser/routes/dispatcher.js";
 import {
   createBrowserControlContext,
   createBrowserRouteDispatcher,
@@ -10,8 +21,7 @@ import {
   resolveBrowserConfig,
   resolveRequestedBrowserProfile,
   startBrowserControlServiceFromConfig,
-  withTimeout,
-} from "../core-api.js";
+} from "../control-service.js";
 
 type BrowserProxyParams = {
   method?: string;
