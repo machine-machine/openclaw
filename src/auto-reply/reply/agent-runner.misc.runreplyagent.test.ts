@@ -189,11 +189,6 @@ describe("runReplyAgent auto-compaction token update", () => {
     );
   }
 
-  async function normalizeComparablePath(filePath: string): Promise<string> {
-    const parent = await fs.realpath(path.dirname(filePath)).catch(() => path.dirname(filePath));
-    return path.join(parent, path.basename(filePath));
-  }
-
   function createBaseRun(params: {
     storePath: string;
     sessionEntry: Record<string, unknown>;

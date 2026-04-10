@@ -215,7 +215,7 @@ export const buildTelegramMessageContext = async ({
     return null;
   }
 
-  const requireTopic = (groupConfig)?.requireTopic;
+  const requireTopic = (groupConfig as TelegramDirectConfig | undefined)?.requireTopic;
   const topicRequiredButMissing = !isGroup && requireTopic === true && dmThreadId == null;
   if (topicRequiredButMissing) {
     logVerbose(`Blocked telegram DM ${chatId}: requireTopic=true but no topic present`);
@@ -324,7 +324,7 @@ export const buildTelegramMessageContext = async ({
   const requireMention = firstDefined(
     activationOverride,
     topicConfig?.requireMention,
-    (groupConfig)?.requireMention,
+    (groupConfig as TelegramGroupConfig | undefined)?.requireMention,
     baseRequireMention,
   );
 

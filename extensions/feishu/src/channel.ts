@@ -204,7 +204,7 @@ function setFeishuNamedAccountEnabled(
   accountId: string,
   enabled: boolean,
 ): ClawdbotConfig {
-  const feishuCfg = cfg.channels?.feishu;
+  const feishuCfg = cfg.channels?.feishu as FeishuConfig | undefined;
   return {
     ...cfg,
     channels: {

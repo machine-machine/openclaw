@@ -33,15 +33,6 @@ type FeishuRequestClient = ReturnType<typeof createFeishuClient> & {
   }): Promise<FeishuPingResponse>;
 };
 
-type FeishuRequestClient = ReturnType<typeof createFeishuClient> & {
-  request(params: {
-    method: "GET";
-    url: string;
-    data: Record<string, never>;
-    timeout: number;
-  }): Promise<FeishuBotInfoResponse>;
-};
-
 function setCachedProbeResult(
   cacheKey: string,
   result: FeishuProbeResult,

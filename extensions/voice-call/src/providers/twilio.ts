@@ -35,10 +35,6 @@ import { decideTwimlResponse, readTwimlRequestView } from "./twilio/twiml-policy
 import { verifyTwilioProviderWebhook } from "./twilio/webhook.js";
 export type { TwilioProviderOptions } from "./twilio.types.js";
 
-type StreamSendResult = {
-  sent: boolean;
-};
-
 function createTwilioRequestDedupeKey(ctx: WebhookContext, verifiedRequestKey?: string): string {
   if (verifiedRequestKey) {
     return verifiedRequestKey;

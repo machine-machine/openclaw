@@ -38,7 +38,7 @@ export type BytePlusCatalogEntry = (typeof BYTEPLUS_MODEL_CATALOG)[number];
 export type BytePlusCodingCatalogEntry = (typeof BYTEPLUS_CODING_MODEL_CATALOG)[number];
 
 export function buildBytePlusModelDefinition(
-  entry: BytePlusCatalogEntry  ,
+  entry: BytePlusCatalogEntry | BytePlusCodingCatalogEntry,
 ): ModelDefinitionConfig {
   return buildVolcModelDefinition(entry, BYTEPLUS_DEFAULT_COST);
 }

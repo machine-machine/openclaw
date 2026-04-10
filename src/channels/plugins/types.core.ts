@@ -19,12 +19,6 @@ export type ChannelExposure = {
   docs?: boolean;
 };
 
-export type ChannelExposure = {
-  configured?: boolean;
-  setup?: boolean;
-  docs?: boolean;
-};
-
 export type ChannelOutboundTargetMode = "explicit" | "implicit" | "heartbeat";
 
 /** Agent tool registered by a channel plugin. */

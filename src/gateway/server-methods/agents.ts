@@ -30,17 +30,11 @@ import { loadConfig, writeConfigFile } from "../../config/config.js";
 import { resolveSessionTranscriptsDirForAgent } from "../../config/sessions/paths.js";
 import type { IdentityConfig } from "../../config/types.base.js";
 import { sameFileIdentity } from "../../infra/file-identity.js";
-import {
-  appendFileWithinRoot,
-  SafeOpenError,
-  readLocalFileSafely,
-  writeFileWithinRoot,
-} from "../../infra/fs-safe.js";
+import { SafeOpenError, readLocalFileSafely, writeFileWithinRoot } from "../../infra/fs-safe.js";
 import { assertNoPathAliasEscape } from "../../infra/path-alias-guards.js";
 import { isNotFoundPathError } from "../../infra/path-guards.js";
 import { movePathToTrash } from "../../plugin-sdk/browser-maintenance.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../routing/session-key.js";
-import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { resolveUserPath } from "../../utils.js";
 import {
   ErrorCodes,
@@ -396,6 +390,10 @@ function sanitizeIdentityLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function resolveOptionalStringParam(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function respondInvalidMethodParams(
   respond: RespondFn,
   method: string,
@@ -630,7 +628,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
     }
 
     const cfg = loadConfig();
-    const rawName = normalizeOptionalString(String(params.name ?? "")) ?? "";
+    const rawName = String(params.name ?? "").trim();
     const agentId = normalizeAgentId(rawName);
     if (agentId === DEFAULT_AGENT_ID) {
       respond(
@@ -650,9 +648,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const workspaceDir = resolveUserPath(
-      normalizeOptionalString(String(params.workspace ?? "")) ?? "",
-    );
+    const workspaceDir = resolveUserPath(String(params.workspace ?? "").trim());
 
     const safeName = sanitizeIdentityLine(rawName);
     const model = resolveOptionalStringParam(params.model);

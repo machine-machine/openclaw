@@ -86,7 +86,7 @@ export function collectTwitchStatusIssues(
     }
 
     const tokenResolution = cfg
-      ? resolveTwitchToken(cfg, { accountId })
+      ? resolveTwitchToken(cfg as Parameters<typeof resolveTwitchToken>[0], { accountId })
       : { token: "", source: "none" };
     if (account && isAccountConfigured(account, tokenResolution.token)) {
       if (account.accessToken?.startsWith("oauth:")) {

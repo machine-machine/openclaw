@@ -2,7 +2,6 @@ import "./reply.directive.directive-behavior.e2e-mocks.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadSessionStore } from "../config/sessions.js";
 import {
-  DEFAULT_TEST_MODEL_CATALOG,
   installDirectiveBehaviorE2EHooks,
   makeWhatsAppDirectiveConfig,
   replyText,

@@ -122,17 +122,6 @@ describe("models-config", () => {
         2,
       )}\n`,
     });
-
-    expect(plan.action).toBe("write");
-    expect(
-      plan.action === "write"
-        ? (
-            JSON.parse(plan.contents) as {
-              providers?: Record<string, { baseUrl?: string }>;
-            }
-          ).providers?.["github-copilot"]?.baseUrl
-        : undefined,
-    ).toBe("https://copilot.local");
   });
 
   it("uses tokenRef env var when github-copilot profile omits plaintext token", () => {

@@ -118,44 +118,6 @@ describe("delivery context helpers", () => {
     expect(formatConversationTarget({ channel: "demo-channel", conversationId: "123" })).toBe(
       "channel:123",
     );
-    expect(
-      deliveryContextKey({ channel: "demo-channel", to: "channel:C1", threadId: "123.456" }),
-    ).toBe("demo-channel|channel:C1||123.456");
-  });
-
-  it("formats generic fallback conversation targets as channels", () => {
-    expect(formatConversationTarget({ channel: "demo-channel", conversationId: "123" })).toBe(
-      "channel:123",
-    );
-  });
-
-  it("formats plugin-defined conversation targets via channel messaging hooks", () => {
-    expect(
-      formatConversationTarget({ channel: "room-chat", conversationId: "!room:example" }),
-    ).toBe("room:!room:example");
-    expect(
-      formatConversationTarget({
-        channel: "room-chat",
-        conversationId: "$thread",
-        parentConversationId: "!room:example",
-      }),
-    ).toBe("room:!room:example");
-    expect(
-      formatConversationTarget({ channel: "room-chat", conversationId: "  " }),
-    ).toBeUndefined();
-  });
-
-  it("resolves delivery targets for plugin-defined child threads", () => {
-    expect(
-      resolveConversationDeliveryTarget({
-        channel: "room-chat",
-        conversationId: "$thread",
-        parentConversationId: "!room:example",
-      }),
-    ).toEqual({
-      to: "room:!room:example",
-      threadId: "$thread",
-    });
   });
 
   it("formats plugin-defined conversation targets via channel messaging hooks", () => {

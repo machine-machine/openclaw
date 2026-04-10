@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LookupFn } from "../../infra/net/ssrf.js";
+import * as ssrf from "../../infra/net/ssrf.js";
 import { type FetchMock, withFetchPreconnect } from "../../test-utils/fetch-mock.js";
 import { makeFetchHeaders } from "./web-fetch.test-harness.js";
 import "./web-fetch.test-mocks.js";
@@ -80,13 +80,15 @@ describe("web_fetch SSRF protection", () => {
   const priorFetch = global.fetch;
 
   beforeEach(() => {
-    vi.stubEnv("FIRECRAWL_API_KEY", "");
+    vi.spyOn(ssrf, "resolvePinnedHostname").mockImplementation((hostname) =>
+      resolvePinnedHostname(hostname, lookupMock),
+    );
   });
 
   afterEach(() => {
     global.fetch = priorFetch;
     lookupMock.mockClear();
-    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("blocks localhost hostnames before fetch/firecrawl", async () => {

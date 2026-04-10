@@ -1,5 +1,3 @@
-import type { ProviderRequestTransportOverrides } from "../agents/provider-request-config.js";
-
 export type MediaUnderstandingKind =
   | "audio.transcription"
   | "video.description"

@@ -53,22 +53,6 @@ function resolveAvailableKnownChannel(params: {
     : undefined;
 }
 
-function resolveAvailableKnownChannel(params: {
-  cfg: OpenClawConfig;
-  value?: string | null;
-}): MessageChannelId | undefined {
-  const normalized = resolveKnownChannel(params.value);
-  if (!normalized) {
-    return undefined;
-  }
-  return resolveOutboundChannelPlugin({
-    channel: normalized,
-    cfg: params.cfg,
-  })
-    ? normalized
-    : undefined;
-}
-
 function isAccountEnabled(account: unknown): boolean {
   if (!account || typeof account !== "object") {
     return true;

@@ -18,7 +18,6 @@ export type SubagentRunRecord = {
   runTimeoutSeconds?: number;
   spawnMode?: SpawnSubagentMode;
   createdAt: number;
-  /** Start time of the current run attempt. */
   startedAt?: number;
   sessionStartedAt?: number;
   accumulatedRuntimeMs?: number;

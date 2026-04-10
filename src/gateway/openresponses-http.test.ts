@@ -56,10 +56,6 @@ beforeEach(() => {
   openResponsesTesting.resetResponseSessionState();
 });
 
-beforeEach(() => {
-  openResponsesTesting.resetResponseSessionState();
-});
-
 async function startServer(port: number, opts?: { openResponsesEnabled?: boolean }) {
   const { startGatewayServer } = await import("./server.js");
   const serverOpts = {

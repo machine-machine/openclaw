@@ -18,7 +18,6 @@ import {
 import { createPendingToolCallState } from "./session-tool-result-state.js";
 import { makeMissingToolResult, sanitizeToolCallInputs } from "./session-transcript-repair.js";
 import { extractToolCallsFromAssistant, extractToolResultId } from "./tool-call-id.js";
-const RAW_APPEND_MESSAGE = Symbol("openclaw.session.rawAppendMessage");
 
 /**
  * Truncate oversized text content blocks in a tool result message.

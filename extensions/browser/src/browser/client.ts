@@ -3,8 +3,6 @@ import type { BrowserTab, BrowserTransport, SnapshotAriaNode } from "./client.ty
 
 export type { BrowserTab, BrowserTransport, SnapshotAriaNode } from "./client.types.js";
 
-export type BrowserTransport = "cdp" | "chrome-mcp";
-
 export type BrowserStatus = {
   enabled: boolean;
   profile?: string;

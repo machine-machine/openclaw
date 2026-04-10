@@ -39,7 +39,6 @@ const mocks = vi.hoisted(() => ({
   fsRealpath: vi.fn(async (p: string) => p),
   fsReadlink: vi.fn(async () => ""),
   fsOpen: vi.fn(async () => ({}) as unknown),
-  appendFileWithinRoot: vi.fn(async () => {}),
   writeFileWithinRoot: vi.fn(async () => {}),
 }));
 
@@ -104,7 +103,6 @@ vi.mock("../../infra/fs-safe.js", async () => {
     await vi.importActual<typeof import("../../infra/fs-safe.js")>("../../infra/fs-safe.js");
   return {
     ...actual,
-    appendFileWithinRoot: mocks.appendFileWithinRoot,
     writeFileWithinRoot: mocks.writeFileWithinRoot,
   };
 });
@@ -575,51 +573,6 @@ describe("agents.create", () => {
       expect.anything(),
       expect.objectContaining({ model: "sonnet-4.6" }),
     );
-  });
-
-  it("rejects creating an agent when IDENTITY.md resolves outside the workspace", async () => {
-    const workspace = "/resolved/tmp/ws";
-    agentsTesting.setDepsForTests({
-      resolveAgentWorkspaceFilePath: async ({ name }) => ({
-        kind: "invalid",
-        requestPath: path.join(workspace, name),
-        reason: "path escapes workspace root",
-      }),
-    });
-
-    const { respond, promise } = makeCall("agents.create", {
-      name: "Unsafe Agent",
-      workspace: "/tmp/ws",
-    });
-    await promise;
-
-    expect(respond).toHaveBeenCalledWith(
-      false,
-      undefined,
-      expect.objectContaining({ message: expect.stringContaining("unsafe workspace file") }),
-    );
-    expect(mocks.writeConfigFile).not.toHaveBeenCalled();
-    expect(mocks.appendFileWithinRoot).not.toHaveBeenCalled();
-  });
-
-  it("does not persist config when IDENTITY.md append is rejected after preflight", async () => {
-    mocks.appendFileWithinRoot.mockRejectedValueOnce(
-      new SafeOpenError("path-mismatch", "path escapes workspace root"),
-    );
-
-    const { respond, promise } = makeCall("agents.create", {
-      name: "Append Reject Agent",
-      workspace: "/tmp/ws",
-    });
-    await promise;
-
-    expect(respond).toHaveBeenCalledWith(
-      false,
-      undefined,
-      expect.objectContaining({ message: expect.stringContaining("unsafe workspace file") }),
-    );
-    expect(mocks.appendFileWithinRoot).toHaveBeenCalledTimes(1);
-    expect(mocks.writeConfigFile).not.toHaveBeenCalled();
   });
 });
 

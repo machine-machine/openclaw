@@ -35,7 +35,7 @@ export function resolveIrcInboundTarget(params: { target: string; senderNick: st
 
 export async function monitorIrcProvider(opts: IrcMonitorOptions): Promise<{ stop: () => void }> {
   const core = getIrcRuntime();
-  const cfg = opts.config ?? (core.config.loadConfig());
+  const cfg = opts.config ?? (core.config.loadConfig() as CoreConfig);
   const account = resolveIrcAccount({
     cfg,
     accountId: opts.accountId,

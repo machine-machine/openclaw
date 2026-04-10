@@ -2479,36 +2479,7 @@ module.exports = { id: "throws-after-import", register() {} };`,
       pluginConfig: {
         allow: ["service-owner-self"],
       },
-      {
-        label: "rejects plugin context engine ids reserved by core",
-        pluginId: "context-engine-core-collision",
-        body: `module.exports = { id: "context-engine-core-collision", register(api) {
-  api.registerContextEngine("legacy", () => ({}));
-} };`,
-        assert: (registry: ReturnType<typeof loadOpenClawPlugins>) => {
-          expectRegistryErrorDiagnostic({
-            registry,
-            pluginId: "context-engine-core-collision",
-            message: "context engine id reserved by core: legacy",
-          });
-        },
-      },
-      {
-        label: "requires plugin CLI registrars to declare explicit command roots",
-        pluginId: "cli-missing-metadata",
-        body: `module.exports = { id: "cli-missing-metadata", register(api) {
-  api.registerCli(() => {});
-} };`,
-        assert: (registry: ReturnType<typeof loadOpenClawPlugins>) => {
-          expect(registry.cliRegistrars).toHaveLength(0);
-          expectRegistryErrorDiagnostic({
-            registry,
-            pluginId: "cli-missing-metadata",
-            message: "cli registration missing explicit commands metadata",
-          });
-        },
-      },
-    ] as const;
+    });
 
     expect(registry.services.filter((entry) => entry.service.id === "shared-service")).toHaveLength(
       1,

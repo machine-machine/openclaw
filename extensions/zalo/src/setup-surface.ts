@@ -2,7 +2,6 @@ import {
   buildSingleChannelSecretPromptState,
   createStandardChannelSetupStatus,
   DEFAULT_ACCOUNT_ID,
-  formatDocsLink,
   hasConfiguredSecretInput,
   promptSingleChannelSecretInput,
   runSingleChannelSecretStep,

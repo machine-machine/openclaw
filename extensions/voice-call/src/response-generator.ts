@@ -201,7 +201,7 @@ export async function generateVoiceResponse(
   // Load or create session entry
   const sessionStore = agentRuntime.session.loadSessionStore(storePath);
   const now = Date.now();
-  let sessionEntry = sessionStore[sessionKey];
+  let sessionEntry = sessionStore[sessionKey] as SessionEntry | undefined;
 
   if (!sessionEntry) {
     sessionEntry = {

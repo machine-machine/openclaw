@@ -196,14 +196,6 @@ describe("telegram thread bindings", () => {
     );
   });
 
-  it("exposes the reset helper through the bundled test api", async () => {
-    const { resetTelegramThreadBindingsForTests } = loadBundledPluginTestApiSync<{
-      resetTelegramThreadBindingsForTests: () => Promise<void>;
-    }>("telegram");
-
-    await expect(resetTelegramThreadBindingsForTests()).resolves.toBeUndefined();
-  });
-
   it("does not persist lifecycle updates when manager persistence is disabled", async () => {
     stateDirOverride = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-telegram-bindings-"));
     process.env.OPENCLAW_STATE_DIR = stateDirOverride;

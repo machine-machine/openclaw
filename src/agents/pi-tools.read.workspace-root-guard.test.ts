@@ -46,8 +46,6 @@ describe("wrapToolWorkspaceRootGuardWithOptions", () => {
 
   beforeAll(loadModule);
 
-  beforeAll(loadModule);
-
   beforeEach(() => {
     mocks.assertSandboxPath.mockReset();
     mocks.assertSandboxPath.mockImplementation(assertSandboxPathImpl);

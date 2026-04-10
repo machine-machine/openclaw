@@ -258,7 +258,7 @@ function buildResolvedFeishuAccount(params: {
   const selectionSource = hasExplicitAccountId
     ? "explicit"
     : (defaultSelection?.source ?? "fallback");
-  const feishuCfg = params.cfg.channels?.feishu;
+  const feishuCfg = params.cfg.channels?.feishu as FeishuConfig | undefined;
 
   const baseEnabled = feishuCfg?.enabled !== false;
   const merged = mergeFeishuAccountConfig(params.cfg, accountId);

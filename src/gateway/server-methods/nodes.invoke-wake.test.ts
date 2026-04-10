@@ -13,12 +13,6 @@ type MockNodeCommandPolicyParams = {
   allowlist: Set<string>;
 };
 
-type MockNodeCommandPolicyParams = {
-  command: string;
-  declaredCommands?: string[];
-  allowlist: Set<string>;
-};
-
 const mocks = vi.hoisted(() => ({
   loadConfig: vi.fn(() => ({})),
   resolveNodeCommandAllowlist: vi.fn<() => Set<string>>(() => new Set()),
@@ -70,24 +64,6 @@ type RespondCall = [
     details?: unknown;
   }?,
 ];
-
-function expectNodeNotConnected(respond: ReturnType<typeof vi.fn>) {
-  const call = respond.mock.calls[0] as RespondCall | undefined;
-  expect(call?.[0]).toBe(false);
-  expect(call?.[2]?.message).toBe("node not connected");
-}
-
-async function invokeDisconnectedNode(nodeId: string, idempotencyKey: string) {
-  const nodeRegistry = {
-    get: vi.fn(() => undefined),
-    invoke: vi.fn().mockResolvedValue({ ok: true }),
-  };
-
-  return await invokeNode({
-    nodeRegistry,
-    requestParams: { nodeId, idempotencyKey },
-  });
-}
 
 type TestNodeSession = {
   nodeId: string;

@@ -6,7 +6,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
-import { SsrFBlockedError } from "../infra/net/ssrf.js";
 import {
   decorateOpenClawProfile,
   ensureProfileCleanExit,

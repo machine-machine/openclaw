@@ -603,35 +603,6 @@ export function buildAllowedModelSet(params: {
 
   const allowedKeys = new Set<string>();
   const syntheticCatalogEntries = new Map<string, ModelCatalogEntry>();
-  const resolveConfiguredSyntheticEntry = (
-    provider: string,
-    model: string,
-  ): ModelCatalogEntry | null => {
-    const configuredModels = params.cfg.models?.providers?.[provider]?.models;
-    if (!Array.isArray(configuredModels)) {
-      return null;
-    }
-    const configured = configuredModels.find(
-      (entry) => typeof entry?.id === "string" && entry.id.trim() === model,
-    );
-    if (!configured) {
-      return null;
-    }
-    return {
-      provider,
-      id: model,
-      name:
-        typeof configured.name === "string" && configured.name.trim().length > 0
-          ? configured.name.trim()
-          : model,
-      contextWindow:
-        typeof configured.contextWindow === "number" && configured.contextWindow > 0
-          ? configured.contextWindow
-          : undefined,
-      reasoning: typeof configured.reasoning === "boolean" ? configured.reasoning : undefined,
-      input: Array.isArray(configured.input) ? configured.input : undefined,
-    };
-  };
   for (const raw of rawAllowlist) {
     const parsed = parseModelRef(String(raw), params.defaultProvider);
     if (!parsed) {

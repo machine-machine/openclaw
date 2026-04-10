@@ -99,66 +99,6 @@ async function isFeedbackInvokeAuthorized(
   return true;
 }
 
-function serializeAdaptiveCardActionValue(value: unknown): string | null {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed ? trimmed : null;
-  }
-  if (value === undefined) {
-    return null;
-  }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return null;
-  }
-}
-
-async function isFeedbackInvokeAuthorized(
-  context: MSTeamsTurnContext,
-  deps: MSTeamsMessageHandlerDeps,
-): Promise<boolean> {
-  const resolved = await resolveMSTeamsSenderAccess({
-    cfg: deps.cfg,
-    activity: context.activity,
-  });
-  const { msteamsCfg, isDirectMessage, conversationId, senderId } = resolved;
-  if (!msteamsCfg) {
-    return true;
-  }
-
-  if (isDirectMessage && resolved.access.decision !== "allow") {
-    deps.log.debug?.("dropping feedback invoke (dm sender not allowlisted)", {
-      sender: senderId,
-      conversationId,
-    });
-    return false;
-  }
-
-  if (
-    !isDirectMessage &&
-    resolved.channelGate.allowlistConfigured &&
-    !resolved.channelGate.allowed
-  ) {
-    deps.log.debug?.("dropping feedback invoke (not in team/channel allowlist)", {
-      conversationId,
-      teamKey: resolved.channelGate.teamKey ?? "none",
-      channelKey: resolved.channelGate.channelKey ?? "none",
-    });
-    return false;
-  }
-
-  if (!isDirectMessage && !resolved.senderGroupAccess.allowed) {
-    deps.log.debug?.("dropping feedback invoke (group sender not allowlisted)", {
-      sender: senderId,
-      conversationId,
-    });
-    return false;
-  }
-
-  return true;
-}
-
 /**
  * Handle fileConsent/invoke activities for large file uploads.
  */

@@ -1091,11 +1091,7 @@ function validateConfigObjectWithPluginsBase(
     }
     seenPlugins.add(pluginId);
     const entry = normalizedPlugins.entries[pluginId];
-    const entryExists = entry !== undefined;
     const entryHasConfig = Boolean(entry?.config);
-    const shouldReplacePluginConfig = opts.applyDefaults
-      ? entryExists || entryHasConfig
-      : entryHasConfig;
 
     const activationState = resolveEffectivePluginActivationState({
       id: pluginId,

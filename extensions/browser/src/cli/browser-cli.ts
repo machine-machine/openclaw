@@ -44,7 +44,7 @@ export function registerBrowserCli(program: Command) {
 
   addGatewayClientOptions(browser);
 
-  const parentOpts = (cmd: Command) => cmd.parent?.opts?.();
+  const parentOpts = (cmd: Command) => cmd.parent?.opts?.() as BrowserParentOpts;
 
   registerBrowserManageCommands(browser, parentOpts);
   registerBrowserInspectCommands(browser, parentOpts);

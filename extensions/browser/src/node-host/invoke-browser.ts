@@ -12,14 +12,6 @@ import {
 import { createBrowserRouteDispatcher } from "../browser/routes/dispatcher.js";
 import {
   createBrowserControlContext,
-  createBrowserRouteDispatcher,
-  detectMime,
-  isPersistentBrowserProfileMutation,
-  loadConfig,
-  normalizeBrowserRequestPath,
-  redactCdpUrl,
-  resolveBrowserConfig,
-  resolveRequestedBrowserProfile,
   startBrowserControlServiceFromConfig,
 } from "../control-service.js";
 

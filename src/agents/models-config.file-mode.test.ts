@@ -13,10 +13,6 @@ afterEach(() => {
   cleanupTempDirs(tempDirs);
 });
 
-afterEach(() => {
-  resetModelsJsonReadyCacheForTest();
-});
-
 describe("models-config file mode", () => {
   it("writes models.json with mode 0600", async () => {
     if (process.platform === "win32") {

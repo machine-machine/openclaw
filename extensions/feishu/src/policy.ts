@@ -83,7 +83,7 @@ export function resolveFeishuGroupConfig(params: {
 export function resolveFeishuGroupToolPolicy(
   params: ChannelGroupContext,
 ): GroupToolPolicyConfig | undefined {
-  const cfg = params.cfg.channels?.feishu;
+  const cfg = params.cfg.channels?.feishu as FeishuConfig | undefined;
   if (!cfg) {
     return undefined;
   }

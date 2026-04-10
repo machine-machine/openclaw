@@ -280,6 +280,7 @@ describe("config plugin validation", () => {
 
   it("warns with actionable guidance when a runtime command name is used in plugins.allow", async () => {
     const res = validateInSuite({
+      agents: { list: [{ id: "pi" }] },
       plugins: {
         allow: ["dreaming"],
         entries: {

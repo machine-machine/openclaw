@@ -43,7 +43,6 @@ describe("plugin-sdk/command-auth", () => {
       totalPages: expect.any(Number),
     });
   });
-}
 
   it("resolves command authorization across allowlist sources", async () => {
     const cases = [

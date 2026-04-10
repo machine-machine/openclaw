@@ -11,15 +11,6 @@ async function loadGatewayRpcRuntime(): Promise<GatewayRpcRuntimeModule> {
   return gatewayRpcRuntimePromise;
 }
 
-type GatewayRpcRuntimeModule = typeof import("./gateway-rpc.runtime.js");
-
-let gatewayRpcRuntimePromise: Promise<GatewayRpcRuntimeModule> | undefined;
-
-async function loadGatewayRpcRuntime(): Promise<GatewayRpcRuntimeModule> {
-  gatewayRpcRuntimePromise ??= import("./gateway-rpc.runtime.js");
-  return gatewayRpcRuntimePromise;
-}
-
 export function addGatewayClientOptions(cmd: Command) {
   return cmd
     .option("--url <url>", "Gateway WebSocket URL (defaults to gateway.remote.url when configured)")

@@ -308,10 +308,6 @@ export async function triggerInternalHook(event: InternalHookEvent): Promise<voi
   const specificHandlers = handlers.get(`${event.type}:${event.action}`) ?? [];
   const allHandlers = [...typeHandlers, ...specificHandlers];
 
-  const typeHandlers = handlers.get(event.type) ?? [];
-  const specificHandlers = handlers.get(`${event.type}:${event.action}`) ?? [];
-  const allHandlers = [...typeHandlers, ...specificHandlers];
-
   for (const handler of allHandlers) {
     try {
       await handler(event);

@@ -760,8 +760,6 @@ export function sanitizeChatHistoryMessages(messages: unknown[], maxChars: numbe
       changed = true;
       continue;
     }
-    const res = sanitizeChatHistoryMessage(message, maxChars);
-    changed ||= res.changed;
     next.push(res.message);
   }
   return changed ? next : messages;
