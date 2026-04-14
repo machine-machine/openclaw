@@ -11,7 +11,7 @@ import {
 } from "./dependency-denylist.js";
 import { getGlobalHookRunner } from "./hook-runner-global.js";
 import { createBeforeInstallHookPayload } from "./install-policy-context.js";
-import type { InstallSafetyOverrides } from "./install-security-scan.js";
+import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
 
 type InstallScanLogger = {
   warn?: (message: string) => void;
@@ -184,13 +184,16 @@ async function inspectNodeModulesSymlinkTarget(params: {
     );
   }
 
+  const resolvedTargetStats = await fs.stat(resolvedTargetPath);
   const resolvedTargetRelativePath = path.relative(params.rootRealPath, resolvedTargetPath);
-  const resolvedTargetStat = await fs.lstat(resolvedTargetPath);
+  const blockedDirectoryFinding = findBlockedPackageDirectoryInPath({
+    pathRelativeToRoot: resolvedTargetRelativePath,
+  });
   return {
-    blockedDirectoryFinding: findBlockedPackageDirectoryInPath({
-      pathRelativeToRoot: resolvedTargetRelativePath,
-    }),
-    blockedFileFinding: resolvedTargetStat.isFile()
+    // File symlinks can point into a blocked package directory, for example
+    // vendor/node_modules/safe-name -> ../plain-crypto-js/dist/index.js.
+    blockedDirectoryFinding,
+    blockedFileFinding: resolvedTargetStats.isFile()
       ? findBlockedPackageFileAliasInPath({
           pathRelativeToRoot: resolvedTargetRelativePath,
         })
@@ -270,6 +273,8 @@ async function collectPackageManifestPaths(
   const queue: Array<{ depth: number; dir: string }> = [{ depth: 0, dir: rootDir }];
   const packageManifestPaths: string[] = [];
   const visitedDirectories = new Set<string>();
+  let firstBlockedDirectoryFinding: BlockedPackageDirectoryFinding | undefined;
+  let firstBlockedFileFinding: BlockedPackageFileFinding | undefined;
   let queueIndex = 0;
 
   while (queueIndex < queue.length) {
@@ -321,19 +326,13 @@ async function collectPackageManifestPaths(
           directoryRelativePath: relativeNextPath,
         });
         if (blockedDirectoryFinding) {
-          return {
-            blockedDirectoryFinding,
-            packageManifestPaths,
-          };
+          firstBlockedDirectoryFinding ??= blockedDirectoryFinding;
         }
         const blockedFileFinding = findBlockedNodeModulesFileAlias({
           fileRelativePath: relativeNextPath,
         });
         if (blockedFileFinding) {
-          return {
-            blockedFileFinding,
-            packageManifestPaths,
-          };
+          firstBlockedFileFinding ??= blockedFileFinding;
         }
         if (pathContainsNodeModulesSegment(relativeNextPath)) {
           const symlinkTargetInspection = await inspectNodeModulesSymlinkTarget({
@@ -342,16 +341,10 @@ async function collectPackageManifestPaths(
             symlinkRelativePath: relativeNextPath,
           });
           if (symlinkTargetInspection.blockedDirectoryFinding) {
-            return {
-              blockedDirectoryFinding: symlinkTargetInspection.blockedDirectoryFinding,
-              packageManifestPaths,
-            };
+            firstBlockedDirectoryFinding ??= symlinkTargetInspection.blockedDirectoryFinding;
           }
           if (symlinkTargetInspection.blockedFileFinding) {
-            return {
-              blockedFileFinding: symlinkTargetInspection.blockedFileFinding,
-              packageManifestPaths,
-            };
+            firstBlockedFileFinding ??= symlinkTargetInspection.blockedFileFinding;
           }
         }
         continue;
@@ -361,10 +354,7 @@ async function collectPackageManifestPaths(
           directoryRelativePath: relativeNextPath,
         });
         if (blockedDirectoryFinding) {
-          return {
-            blockedDirectoryFinding,
-            packageManifestPaths,
-          };
+          firstBlockedDirectoryFinding ??= blockedDirectoryFinding;
         }
         queue.push({ depth: current.depth + 1, dir: nextPath });
         continue;
@@ -374,10 +364,7 @@ async function collectPackageManifestPaths(
           fileRelativePath: relativeNextPath,
         });
         if (blockedFileFinding) {
-          return {
-            blockedFileFinding,
-            packageManifestPaths,
-          };
+          firstBlockedFileFinding ??= blockedFileFinding;
         }
       }
       if (entry.isFile() && entry.name === "package.json") {
@@ -391,7 +378,11 @@ async function collectPackageManifestPaths(
     }
   }
 
-  return { packageManifestPaths };
+  return {
+    packageManifestPaths,
+    blockedDirectoryFinding: firstBlockedDirectoryFinding,
+    blockedFileFinding: firstBlockedFileFinding,
+  };
 }
 
 async function scanManifestDependencyDenylist(params: {
@@ -400,35 +391,6 @@ async function scanManifestDependencyDenylist(params: {
   targetLabel: string;
 }): Promise<InstallSecurityScanResult | undefined> {
   const traversalResult = await collectPackageManifestPaths(params.packageDir);
-  if (traversalResult.blockedDirectoryFinding) {
-    const reason = buildBlockedDependencyDirectoryReason({
-      dependencyName: traversalResult.blockedDirectoryFinding.dependencyName,
-      directoryRelativePath: traversalResult.blockedDirectoryFinding.directoryRelativePath,
-      targetLabel: params.targetLabel,
-    });
-    params.logger.warn?.(`WARNING: ${reason}`);
-    return {
-      blocked: {
-        code: "security_scan_blocked",
-        reason,
-      },
-    };
-  }
-  if (traversalResult.blockedFileFinding) {
-    const reason = buildBlockedDependencyFileReason({
-      dependencyName: traversalResult.blockedFileFinding.dependencyName,
-      fileRelativePath: traversalResult.blockedFileFinding.fileRelativePath,
-      targetLabel: params.targetLabel,
-    });
-    params.logger.warn?.(`WARNING: ${reason}`);
-    return {
-      blocked: {
-        code: "security_scan_blocked",
-        reason,
-      },
-    };
-  }
-
   const packageManifestPaths = traversalResult.packageManifestPaths;
   for (const manifestPath of packageManifestPaths) {
     let manifest: PackageManifest;
@@ -448,6 +410,37 @@ async function scanManifestDependencyDenylist(params: {
       findings: blockedDependencies,
       manifestPackageName: manifest.name,
       manifestRelativePath,
+      targetLabel: params.targetLabel,
+    });
+    params.logger.warn?.(`WARNING: ${reason}`);
+    return {
+      blocked: {
+        code: "security_scan_blocked",
+        reason,
+      },
+    };
+  }
+  // Prefer manifest evidence when available because it points at the exact
+  // package declaration. Directory/file findings catch stripped, symlinked, or
+  // otherwise hidden node_modules payloads that do not expose a usable manifest.
+  if (traversalResult.blockedDirectoryFinding) {
+    const reason = buildBlockedDependencyDirectoryReason({
+      dependencyName: traversalResult.blockedDirectoryFinding.dependencyName,
+      directoryRelativePath: traversalResult.blockedDirectoryFinding.directoryRelativePath,
+      targetLabel: params.targetLabel,
+    });
+    params.logger.warn?.(`WARNING: ${reason}`);
+    return {
+      blocked: {
+        code: "security_scan_blocked",
+        reason,
+      },
+    };
+  }
+  if (traversalResult.blockedFileFinding) {
+    const reason = buildBlockedDependencyFileReason({
+      dependencyName: traversalResult.blockedFileFinding.dependencyName,
+      fileRelativePath: traversalResult.blockedFileFinding.fileRelativePath,
       targetLabel: params.targetLabel,
     });
     params.logger.warn?.(`WARNING: ${reason}`);
