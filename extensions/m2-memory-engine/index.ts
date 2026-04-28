@@ -47,6 +47,7 @@ class QdrantMemoryDB {
   private collectionReady = false;
   private initPromise: Promise<void> | null = null;
   private useNamedVectors = false; // true if collection uses named "dense" vectors
+  private readonly apiKey: string | undefined;
 
   constructor(
     private readonly url: string,
@@ -54,9 +55,18 @@ class QdrantMemoryDB {
     private readonly vectorDim: number,
     apiKey?: string,
   ) {
-    this.client = new QdrantClient({
-      url,
-      apiKey,
+    this.apiKey = apiKey;
+    this.client = this.createClient();
+  }
+
+  // Build a fresh QdrantClient. Called from the constructor and from
+  // doEnsureCollection's catch path so a transient undici/DNS poisoning
+  // (common during Docker startup races) doesn't permanently wedge the
+  // plugin: each retry gets a clean connection pool.
+  private createClient(): QdrantClient {
+    return new QdrantClient({
+      url: this.url,
+      apiKey: this.apiKey,
       timeout: QDRANT_TIMEOUT_MS,
     });
   }
@@ -99,7 +109,13 @@ class QdrantMemoryDB {
 
       this.collectionReady = true;
     } catch (err) {
+      // Reset cached state AND rebuild the QdrantClient. Without the rebuild,
+      // an undici connection pool poisoned by a transient DNS failure during
+      // gateway startup stays poisoned for the rest of the process — every
+      // subsequent call returns the same "fetch failed" error even after
+      // qdrant becomes reachable. Recreating the client gets a fresh pool.
       this.initPromise = null;
+      this.client = this.createClient();
       throw new Error(`m2-memory-engine: failed to ensure Qdrant collection: ${String(err)}`, {
         cause: err,
       });
