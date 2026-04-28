@@ -8,7 +8,8 @@
     "@qdrant/js-client-rest": "1.12.0",
     "@sinclair/typebox": "0.34.48",
     "neo4j-driver": "^5.27.0",
-    "openai": "^6.27.0"
+    "openai": "^6.27.0",
+    "undici": "^7.0.0"
   },
   "openclaw": {
     "extensions": [

@@ -10,6 +10,7 @@ import { QdrantClient } from "@qdrant/js-client-rest";
 import { Type } from "@sinclair/typebox";
 import OpenAI from "openai";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/memory-lancedb";
+import { Agent, setGlobalDispatcher } from "undici";
 import {
   DEFAULT_CAPTURE_MAX_CHARS,
   MEMORY_CATEGORIES,
@@ -109,13 +110,27 @@ class QdrantMemoryDB {
 
       this.collectionReady = true;
     } catch (err) {
-      // Reset cached state AND rebuild the QdrantClient. Without the rebuild,
-      // an undici connection pool poisoned by a transient DNS failure during
-      // gateway startup stays poisoned for the rest of the process — every
-      // subsequent call returns the same "fetch failed" error even after
-      // qdrant becomes reachable. Recreating the client gets a fresh pool.
+      // Reset every layer of cached state. Three layers can wedge after a
+      // transient fetch failure (most often a DNS race during gateway
+      // startup or container restart):
+      //   1. initPromise — set by ensureCollection(); short-circuits retries
+      //   2. this.client — QdrantClient instance with stale internal state
+      //   3. undici's process-wide global dispatcher — Node 22's fetch keeps
+      //      a shared connection pool whose entries can stay in a poisoned
+      //      state for the lifetime of the process; replacing the dispatcher
+      //      with a fresh Agent forces every subsequent fetch (including from
+      //      the new QdrantClient and from any other plugin code that uses
+      //      global fetch) to dial fresh sockets.
+      // Without all three resets the plugin would keep returning the same
+      // "fetch failed" error indefinitely until the gateway process restarted.
       this.initPromise = null;
       this.client = this.createClient();
+      try {
+        setGlobalDispatcher(new Agent());
+      } catch {
+        // setGlobalDispatcher should never throw in supported Node versions;
+        // swallow defensively so the catch path can't itself break recovery.
+      }
       throw new Error(`m2-memory-engine: failed to ensure Qdrant collection: ${String(err)}`, {
         cause: err,
       });
