@@ -103,6 +103,33 @@ describe("createOllamaStreamFn thinking events", () => {
     });
   }
 
+  async function streamOllamaEvents(
+    chunks: Array<Record<string, unknown>>,
+    options: Parameters<ReturnType<typeof createOllamaStreamFn>>[2] = {},
+  ): Promise<Array<{ type: string; [key: string]: unknown }>> {
+    const body = makeNdjsonBody(chunks);
+    fetchWithSsrFGuardMock.mockResolvedValue({
+      response: new Response(body, { status: 200 }),
+      release: vi.fn(async () => undefined),
+    });
+
+    const streamFn = createOllamaStreamFn("http://localhost:11434");
+    const stream = streamFn(
+      { api: "ollama", provider: "ollama", id: "qwen3.5", contextWindow: 65536 } as never,
+      { messages: [{ role: "user", content: "test" }] } as never,
+      options,
+    );
+
+    const events: Array<{ type: string; [key: string]: unknown }> = [];
+    for await (const event of stream as AsyncIterable<{
+      type: string;
+      [key: string]: unknown;
+    }>) {
+      events.push(event);
+    }
+    return events;
+  }
+
   it("emits thinking_start, thinking_delta, and thinking_end events for thinking content", async () => {
     const thinkingChunks = [
       {
@@ -134,24 +161,7 @@ describe("createOllamaStreamFn thinking events", () => {
       },
     ];
 
-    const body = makeNdjsonBody(thinkingChunks);
-    fetchWithSsrFGuardMock.mockResolvedValue({
-      response: new Response(body, { status: 200 }),
-      release: vi.fn(async () => undefined),
-    });
-
-    const streamFn = createOllamaStreamFn("http://localhost:11434");
-    const stream = streamFn(
-      { api: "ollama", provider: "ollama", id: "qwen3.5", contextWindow: 65536 } as never,
-      { messages: [{ role: "user", content: "test" }] } as never,
-      {},
-    );
-
-    const events: Array<{ type: string; [key: string]: unknown }> = [];
-    for await (const event of stream as AsyncIterable<{ type: string; [key: string]: unknown }>) {
-      events.push(event);
-    }
-
+    const events = await streamOllamaEvents(thinkingChunks);
     const eventTypes = events.map((e) => e.type);
 
     expect(eventTypes).toContain("thinking_start");
@@ -180,8 +190,8 @@ describe("createOllamaStreamFn thinking events", () => {
 
     const done = events.find((e) => e.type === "done") as { message?: { content: unknown[] } };
     const content = done?.message?.content ?? [];
-    expect(content[0]).toMatchObject({ type: "thinking", thinking: "Step 1 and step 2" });
-    expect(content[1]).toMatchObject({ type: "text", text: "The answer" });
+    expect(content[0]).toEqual({ type: "thinking", thinking: "Step 1 and step 2" });
+    expect(content[1]).toEqual({ type: "text", text: "The answer" });
   });
 
   it("streams without thinking events when no thinking content is present", async () => {
@@ -203,24 +213,7 @@ describe("createOllamaStreamFn thinking events", () => {
       },
     ];
 
-    const body = makeNdjsonBody(chunks);
-    fetchWithSsrFGuardMock.mockResolvedValue({
-      response: new Response(body, { status: 200 }),
-      release: vi.fn(async () => undefined),
-    });
-
-    const streamFn = createOllamaStreamFn("http://localhost:11434");
-    const stream = streamFn(
-      { api: "ollama", provider: "ollama", id: "qwen3.5", contextWindow: 65536 } as never,
-      { messages: [{ role: "user", content: "test" }] } as never,
-      {},
-    );
-
-    const events: Array<{ type: string }> = [];
-    for await (const event of stream as AsyncIterable<{ type: string }>) {
-      events.push(event);
-    }
-
+    const events = await streamOllamaEvents(chunks);
     const eventTypes = events.map((e) => e.type);
     expect(eventTypes).not.toContain("thinking_start");
     expect(eventTypes).not.toContain("thinking_delta");
@@ -231,5 +224,29 @@ describe("createOllamaStreamFn thinking events", () => {
 
     const textStart = events.find((e) => e.type === "text_start") as { contentIndex?: number };
     expect(textStart?.contentIndex).toBe(0);
+  });
+
+  it("uses generic stream timeout for Ollama request timeout", async () => {
+    await streamOllamaEvents([makeOllamaResponse({ content: "ok" })], { timeoutMs: 2500 });
+
+    expect(fetchWithSsrFGuardMock).toHaveBeenCalledWith({
+      url: "http://localhost:11434/api/chat",
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "qwen3.5",
+          messages: [{ role: "user", content: "test" }],
+          stream: true,
+          options: {},
+        }),
+      },
+      policy: {
+        allowPrivateNetwork: true,
+        hostnameAllowlist: ["localhost"],
+      },
+      timeoutMs: 2500,
+      auditContext: "ollama-stream.chat",
+    });
   });
 });

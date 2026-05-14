@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { extractToolCallsFromAssistant, extractToolResultId } from "../tool-call-id.js";
 
@@ -10,6 +10,10 @@ type AnthropicContentBlock = {
   toolUseId?: string;
   toolCallId?: string;
 };
+type UserContentBlock = Extract<
+  Extract<AgentMessage, { role: "user" }>["content"],
+  readonly unknown[]
+>[number];
 
 function isToolCallBlock(block: AnthropicContentBlock): boolean {
   return block.type === "toolUse" || block.type === "toolCall" || block.type === "functionCall";
@@ -350,8 +354,8 @@ export function mergeConsecutiveUserTurns(
   current: Extract<AgentMessage, { role: "user" }>,
 ): Extract<AgentMessage, { role: "user" }> {
   const rawContent = [
-    ...(Array.isArray(previous.content) ? previous.content : []),
-    ...(Array.isArray(current.content) ? current.content : []),
+    ...normalizeUserContentForMerge(previous.content),
+    ...normalizeUserContentForMerge(current.content),
   ];
 
   // Deduplicate toolResult blocks by toolUseId to prevent
@@ -360,11 +364,12 @@ export function mergeConsecutiveUserTurns(
   // injects a second user message containing the same tool_result.
   const seenToolUseIds = new Set<string>();
   const mergedContent = rawContent.filter((block) => {
-    if (block && block.type === "toolResult" && block.toolUseId) {
-      if (seenToolUseIds.has(block.toolUseId)) {
+    const b = block as { type?: string; toolUseId?: string } | null | undefined;
+    if (b && b.type === "toolResult" && b.toolUseId) {
+      if (seenToolUseIds.has(b.toolUseId)) {
         return false;
       }
-      seenToolUseIds.add(block.toolUseId);
+      seenToolUseIds.add(b.toolUseId);
     }
     return true;
   });
@@ -374,6 +379,16 @@ export function mergeConsecutiveUserTurns(
     content: mergedContent,
     timestamp: current.timestamp ?? previous.timestamp,
   };
+}
+
+function normalizeUserContentForMerge(content: unknown): UserContentBlock[] {
+  if (Array.isArray(content)) {
+    return content as UserContentBlock[];
+  }
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
+  return [];
 }
 
 /**
