@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const spawnMock = vi.hoisted(() => vi.fn());
@@ -20,6 +21,8 @@ vi.mock("./suite-runtime-gateway.js", () => ({
 }));
 
 import {
+  findManagedDreamingCronJob,
+  isManagedDreamingCronJob,
   listCronJobs,
   readDoctorMemoryStatus,
   runAgentPrompt,
@@ -29,25 +32,45 @@ import {
   waitForMemorySearchMatch,
 } from "./suite-runtime-agent-process.js";
 
+type MockEmitter = {
+  emit: (eventName: string | symbol, ...args: unknown[]) => boolean;
+  on: (eventName: string | symbol, listener: (...args: unknown[]) => void) => MockEmitter;
+  once: (eventName: string | symbol, listener: (...args: unknown[]) => void) => MockEmitter;
+};
+
+type MockChildProcess = MockEmitter & {
+  stdout: MockEmitter;
+  stderr: MockEmitter;
+  kill: ReturnType<typeof vi.fn>;
+};
+
+function createMockEmitter() {
+  return new EventEmitter() as unknown as MockEmitter;
+}
+
 function createSpawnedProcess() {
-  const child = new EventEmitter() as EventEmitter & {
-    stdout: EventEmitter;
-    stderr: EventEmitter;
-    kill: ReturnType<typeof vi.fn>;
-    once: (event: string, listener: (...args: unknown[]) => void) => unknown;
-    on: (event: string, listener: (...args: unknown[]) => void) => unknown;
-  };
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
+  const child = createMockEmitter() as MockChildProcess;
+  child.stdout = createMockEmitter();
+  child.stderr = createMockEmitter();
   child.kill = vi.fn();
   return child;
 }
 
 async function waitForSpawnCount(count: number) {
-  while (spawnMock.mock.calls.length < count) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await vi.waitFor(() => {
+    expect(spawnMock).toHaveBeenCalledTimes(count);
+  });
+  await Promise.resolve();
+}
+
+function firstSpawnCall(): unknown[] | undefined {
+  return spawnMock.mock.calls[0];
+}
+
+function firstGatewayCall(
+  gatewayCall: ReturnType<typeof vi.fn>,
+): [string, unknown, unknown] | undefined {
+  return gatewayCall.mock.calls[0] as [string, unknown, unknown] | undefined;
 }
 
 describe("qa suite runtime agent process helpers", () => {
@@ -69,8 +92,8 @@ describe("qa suite runtime agent process helpers", () => {
           tempRoot: "/tmp/runtime",
           runtimeEnv: { PATH: "/usr/bin" },
         },
-        primaryModel: "openai/gpt-5.4",
-        alternateModel: "openai/gpt-5.4-mini",
+        primaryModel: "openai/gpt-5.5",
+        alternateModel: "openai/gpt-5.5-mini",
         providerMode: "mock-openai",
       } as never,
       ["qa", "suite"],
@@ -81,14 +104,56 @@ describe("qa suite runtime agent process helpers", () => {
     child.emit("exit", 0);
 
     await expect(pending).resolves.toBe("ok");
-    expect(spawnMock).toHaveBeenCalledWith(
-      "/usr/bin/node",
-      ["/repo/dist/index.js", "qa", "suite"],
-      expect.objectContaining({
-        cwd: "/tmp/runtime",
-        env: { PATH: "/usr/bin" },
-      }),
+    const spawnCall = firstSpawnCall();
+    expect(spawnCall?.[0]).toBe("/usr/bin/node");
+    expect(spawnCall?.[1]).toEqual([path.join("/repo", "dist", "index.js"), "qa", "suite"]);
+    expect((spawnCall?.[2] as { cwd?: string; env?: unknown } | undefined)?.cwd).toBe(
+      "/tmp/runtime",
     );
+    expect((spawnCall?.[2] as { env?: unknown } | undefined)?.env).toEqual({ PATH: "/usr/bin" });
+  });
+
+  it("merges isolated env overrides into qa cli runs", async () => {
+    const child = createSpawnedProcess();
+    spawnMock.mockReturnValue(child);
+
+    const pending = runQaCli(
+      {
+        repoRoot: "/repo",
+        gateway: {
+          tempRoot: "/tmp/runtime",
+          runtimeEnv: { PATH: "/usr/bin", OPENCLAW_STATE_DIR: "/tmp/default-state" },
+        },
+        primaryModel: "openai/gpt-5.5",
+        alternateModel: "openai/gpt-5.5-mini",
+        providerMode: "mock-openai",
+      } as never,
+      ["crestodian", "-m", "overview"],
+      {
+        env: {
+          OPENCLAW_STATE_DIR: "/tmp/isolated-state",
+          OPENCLAW_CONFIG_PATH: "/tmp/isolated-state/openclaw.json",
+        },
+      },
+    );
+
+    await waitForSpawnCount(1);
+    child.stdout.emit("data", Buffer.from("ok\n"));
+    child.emit("exit", 0);
+
+    await expect(pending).resolves.toBe("ok");
+    const spawnCall = firstSpawnCall();
+    expect(spawnCall?.[0]).toBe("/usr/bin/node");
+    expect(spawnCall?.[1]).toEqual([
+      path.join("/repo", "dist", "index.js"),
+      "crestodian",
+      "-m",
+      "overview",
+    ]);
+    const spawnEnv = (spawnCall?.[2] as { env?: Record<string, string> } | undefined)?.env;
+    expect(spawnEnv?.PATH).toBe("/usr/bin");
+    expect(spawnEnv?.OPENCLAW_STATE_DIR).toBe("/tmp/isolated-state");
+    expect(spawnEnv?.OPENCLAW_CONFIG_PATH).toBe("/tmp/isolated-state/openclaw.json");
   });
 
   it("parses json qa cli output when requested", async () => {
@@ -102,8 +167,8 @@ describe("qa suite runtime agent process helpers", () => {
           tempRoot: "/tmp/runtime",
           runtimeEnv: {},
         },
-        primaryModel: "openai/gpt-5.4",
-        alternateModel: "openai/gpt-5.4-mini",
+        primaryModel: "openai/gpt-5.5",
+        alternateModel: "openai/gpt-5.5-mini",
         providerMode: "mock-openai",
       } as never,
       ["memory", "search"],
@@ -115,6 +180,68 @@ describe("qa suite runtime agent process helpers", () => {
     child.emit("exit", 0);
 
     await expect(pending).resolves.toEqual({ ok: true });
+  });
+
+  it("parses json qa cli output after colored startup logs", async () => {
+    const child = createSpawnedProcess();
+    spawnMock.mockReturnValue(child);
+
+    const pending = runQaCli(
+      {
+        repoRoot: "/repo",
+        gateway: {
+          tempRoot: "/tmp/runtime",
+          runtimeEnv: {},
+        },
+        primaryModel: "openai/gpt-5.5",
+        alternateModel: "openai/gpt-5.5-mini",
+        providerMode: "mock-openai",
+      } as never,
+      ["memory", "search", "--json"],
+      { json: true },
+    );
+
+    await waitForSpawnCount(1);
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        '\u001b[35m[plugins]\u001b[39m \u001b[36mcodex loaded plugin package metadata\u001b[39m\n{"results":[{"text":"ORBIT-10"}]}\n',
+      ),
+    );
+    child.emit("exit", 0);
+
+    await expect(pending).resolves.toEqual({ results: [{ text: "ORBIT-10" }] });
+  });
+
+  it("parses pretty json qa cli output after startup logs", async () => {
+    const child = createSpawnedProcess();
+    spawnMock.mockReturnValue(child);
+
+    const pending = runQaCli(
+      {
+        repoRoot: "/repo",
+        gateway: {
+          tempRoot: "/tmp/runtime",
+          runtimeEnv: {},
+        },
+        primaryModel: "openai/gpt-5.5",
+        alternateModel: "openai/gpt-5.5-mini",
+        providerMode: "mock-openai",
+      } as never,
+      ["memory", "search", "--json"],
+      { json: true },
+    );
+
+    await waitForSpawnCount(1);
+    child.stdout.emit(
+      "data",
+      Buffer.from(
+        '[plugins] memory-core loaded plugin package metadata\n{\n  "results": [\n    {\n      "text": "ORBIT-10"\n    }\n  ]\n}\n',
+      ),
+    );
+    child.emit("exit", 0);
+
+    await expect(pending).resolves.toEqual({ results: [{ text: "ORBIT-10" }] });
   });
 
   it("starts an agent run with transport-derived delivery metadata", async () => {
@@ -136,17 +263,49 @@ describe("qa suite runtime agent process helpers", () => {
         message: "hello",
       }),
     ).resolves.toEqual({ runId: "run-1" });
-    expect(gatewayCall).toHaveBeenCalledWith(
-      "agent",
-      expect.objectContaining({
-        sessionKey: "session-1",
-        message: "hello",
-        channel: "qa-channel",
-        replyChannel: "reply-channel",
-        replyTo: "reply-target",
-      }),
-      expect.any(Object),
-    );
+    const gatewayArgs = firstGatewayCall(gatewayCall);
+    expect(gatewayArgs?.[0]).toBe("agent");
+    const agentPayload = gatewayArgs?.[1] as
+      | {
+          channel?: string;
+          message?: string;
+          replyChannel?: string;
+          replyTo?: string;
+          sessionKey?: string;
+        }
+      | undefined;
+    expect(agentPayload?.sessionKey).toBe("session-1");
+    expect(agentPayload?.message).toBe("hello");
+    expect(agentPayload?.channel).toBe("qa-channel");
+    expect(agentPayload?.replyChannel).toBe("reply-channel");
+    expect(agentPayload?.replyTo).toBe("reply-target");
+    expect(gatewayArgs?.[2]).toBeTypeOf("object");
+  });
+
+  it("finds managed dreaming cron jobs across legacy and current payload contracts", () => {
+    const legacy = {
+      id: "legacy",
+      name: "Memory Dreaming Promotion",
+      payload: {
+        kind: "systemEvent",
+        text: "__openclaw_memory_core_short_term_promotion_dream__",
+      },
+    };
+    const current = {
+      id: "current",
+      name: "Memory Dreaming Promotion",
+      payload: {
+        kind: "agentTurn",
+        message: "__openclaw_memory_core_short_term_promotion_dream__",
+        lightContext: true,
+      },
+      sessionTarget: "isolated",
+      delivery: { mode: "none" },
+    };
+
+    expect(isManagedDreamingCronJob(legacy)).toBe(true);
+    expect(isManagedDreamingCronJob(current)).toBe(true);
+    expect(findManagedDreamingCronJob([{ id: "other", name: "Other" }, current])).toBe(current);
   });
 
   it("waits for an agent run and fails when the run does not finish ok", async () => {

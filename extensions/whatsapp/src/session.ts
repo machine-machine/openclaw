@@ -1,30 +1,41 @@
 import { randomUUID } from "node:crypto";
 import fsSync from "node:fs";
-import fs from "node:fs/promises";
 import type { Agent } from "node:https";
-import path from "node:path";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import { formatCliCommand } from "openclaw/plugin-sdk/cli-runtime";
 import { VERSION } from "openclaw/plugin-sdk/cli-runtime";
-import { resolveAmbientNodeProxyAgent } from "openclaw/plugin-sdk/extension-shared";
+import {
+  resolveEnvHttpProxyUrl,
+  shouldUseEnvHttpProxyForUrl,
+} from "openclaw/plugin-sdk/fetch-runtime";
 import { danger, success } from "openclaw/plugin-sdk/runtime-env";
 import { getChildLogger, toPinoLikeLogger } from "openclaw/plugin-sdk/runtime-env";
-import { ensureDir, resolveUserPath } from "openclaw/plugin-sdk/text-runtime";
+import { ensureDir, resolveUserPath } from "openclaw/plugin-sdk/text-utility-runtime";
 import {
-  maybeRestoreCredsFromBackup,
   readCredsJsonRaw,
+  restoreCredsFromBackupIfNeeded,
   resolveDefaultWebAuthDir,
   resolveWebCredsBackupPath,
   resolveWebCredsPath,
 } from "./auth-store.js";
-import { formatError, getStatusCode } from "./session-errors.js";
 import {
-  BufferJSON,
+  enqueueCredsSave,
+  waitForCredsSaveQueueWithTimeout,
+  writeCredsJsonAtomically,
+} from "./creds-persistence.js";
+import { renderQrTerminal } from "./qr-terminal.js";
+import { getStatusCode } from "./session-errors.js";
+import {
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   makeWASocket,
   useMultiFileAuthState,
 } from "./session.runtime.js";
+import {
+  DEFAULT_WHATSAPP_SOCKET_TIMING,
+  type WhatsAppSocketTimingOptions,
+} from "./socket-timing.js";
 export { formatError, getStatusCode } from "./session-errors.js";
 
 export {
@@ -32,57 +43,43 @@ export {
   logoutWeb,
   logWebSelfId,
   pickWebChannel,
+  readWebAuthSnapshot,
+  readWebAuthState,
+  readWebAuthExistsBestEffort,
+  readWebAuthExistsForDecision,
+  readWebAuthSnapshotBestEffort,
+  readWebSelfIdentityForDecision,
   readWebSelfId,
+  WHATSAPP_AUTH_UNSTABLE_CODE,
+  WhatsAppAuthUnstableError,
+  type WhatsAppWebAuthState,
   WA_WEB_AUTH_DIR,
   webAuthExists,
 } from "./auth-store.js";
+export {
+  waitForCredsSaveQueue,
+  waitForCredsSaveQueueWithTimeout,
+  writeCredsJsonAtomically,
+} from "./creds-persistence.js";
+export type { CredsQueueWaitResult } from "./creds-persistence.js";
 
 const LOGGED_OUT_STATUS = DisconnectReason?.loggedOut ?? 401;
+const WHATSAPP_WEBSOCKET_PROXY_TARGET = "https://mmg.whatsapp.net/";
+const CREDS_FLUSH_TIMEOUT_MESSAGE =
+  "Queued WhatsApp creds save did not finish before auth bootstrap; skipping repair and continuing with primary creds.";
 
-async function loadQrTerminal() {
-  const mod = await import("qrcode-terminal");
-  return mod.default ?? mod;
-}
-
-export async function writeCredsJsonAtomically(
-  authDir: string,
-  creds: unknown,
-): Promise<void> {
-  const credsPath = resolveWebCredsPath(authDir);
-  const tempPath = path.join(authDir, `.creds.${process.pid}.${Date.now()}.tmp`);
-  try {
-    await fs.writeFile(tempPath, JSON.stringify(creds, BufferJSON.replacer), { mode: 0o600 });
-    await fs.rename(tempPath, credsPath);
-  } catch (err) {
-    try {
-      await fs.rm(tempPath, { force: true });
-    } catch {
-      // best-effort cleanup
-    }
-    throw err;
-  }
-}
-
-// Per-authDir queues so multi-account creds saves don't block each other.
-const credsSaveQueues = new Map<string, Promise<void>>();
-const CREDS_SAVE_FLUSH_TIMEOUT_MS = 15_000;
 function enqueueSaveCreds(
   authDir: string,
   saveCreds: () => Promise<void> | void,
   logger: ReturnType<typeof getChildLogger>,
 ): void {
-  const prev = credsSaveQueues.get(authDir) ?? Promise.resolve();
-  const next = prev
-    .then(() => safeSaveCreds(authDir, saveCreds, logger))
-    .catch((err) => {
+  enqueueCredsSave(
+    authDir,
+    () => safeSaveCreds(authDir, saveCreds, logger),
+    (err) => {
       logger.warn({ error: String(err) }, "WhatsApp creds save queue error");
-    })
-    .finally(() => {
-      if (credsSaveQueues.get(authDir) === next) {
-        credsSaveQueues.delete(authDir);
-      }
-    });
-  credsSaveQueues.set(authDir, next);
+    },
+  );
 }
 
 async function safeSaveCreds(
@@ -119,6 +116,11 @@ async function safeSaveCreds(
   }
 }
 
+async function printTerminalQr(qr: string): Promise<void> {
+  const output = await renderQrTerminal(qr);
+  process.stdout.write(output.endsWith("\n") ? output : `${output}\n`);
+}
+
 /**
  * Create a Baileys socket backed by the multi-file auth store we keep on disk.
  * Consumers can opt into QR printing for interactive login flows.
@@ -126,7 +128,10 @@ async function safeSaveCreds(
 export async function createWaSocket(
   printQr: boolean,
   verbose: boolean,
-  opts: { authDir?: string; onQr?: (qr: string) => void } = {},
+  opts: {
+    authDir?: string;
+    onQr?: (qr: string) => void;
+  } & WhatsAppSocketTimingOptions = {},
 ): Promise<ReturnType<typeof makeWASocket>> {
   const baseLogger = getChildLogger(
     { module: "baileys" },
@@ -138,7 +143,12 @@ export async function createWaSocket(
   const authDir = resolveUserPath(opts.authDir ?? resolveDefaultWebAuthDir());
   await ensureDir(authDir);
   const sessionLogger = getChildLogger({ module: "web-session" });
-  maybeRestoreCredsFromBackup(authDir);
+  const queueResult = await waitForCredsSaveQueueWithTimeout(authDir);
+  if (queueResult === "timed_out") {
+    sessionLogger.warn({ authDir }, CREDS_FLUSH_TIMEOUT_MESSAGE);
+  } else {
+    await restoreCredsFromBackupIfNeeded(authDir);
+  }
   const { state } = await useMultiFileAuthState(authDir);
   const saveCreds = async () => {
     await writeCredsJsonAtomically(authDir, state.creds);
@@ -146,6 +156,13 @@ export async function createWaSocket(
   const { version } = await fetchLatestBaileysVersion();
   const agent = await resolveEnvProxyAgent(sessionLogger);
   const fetchAgent = await resolveEnvFetchDispatcher(sessionLogger, agent);
+  const socketTiming = {
+    keepAliveIntervalMs:
+      opts.keepAliveIntervalMs ?? DEFAULT_WHATSAPP_SOCKET_TIMING.keepAliveIntervalMs,
+    connectTimeoutMs: opts.connectTimeoutMs ?? DEFAULT_WHATSAPP_SOCKET_TIMING.connectTimeoutMs,
+    defaultQueryTimeoutMs:
+      opts.defaultQueryTimeoutMs ?? DEFAULT_WHATSAPP_SOCKET_TIMING.defaultQueryTimeoutMs,
+  };
   const sock = makeWASocket({
     auth: {
       creds: state.creds,
@@ -157,6 +174,7 @@ export async function createWaSocket(
     browser: ["openclaw", "cli", VERSION],
     syncFullHistory: false,
     markOnlineOnConnect: false,
+    ...socketTiming,
     agent,
     // Baileys types still model `fetchAgent` as a Node agent even though the
     // runtime path accepts an undici dispatcher for upload fetches.
@@ -164,37 +182,35 @@ export async function createWaSocket(
   });
 
   sock.ev.on("creds.update", () => enqueueSaveCreds(authDir, saveCreds, sessionLogger));
-  sock.ev.on(
-    "connection.update",
-    async (update: Partial<import("@whiskeysockets/baileys").ConnectionState>) => {
-      try {
-        const { connection, lastDisconnect, qr } = update;
-        if (qr) {
-          opts.onQr?.(qr);
-          if (printQr) {
-            console.log("Scan this QR in WhatsApp (Linked Devices):");
-            const qrcode = await loadQrTerminal();
-            qrcode.generate(qr, { small: true });
-          }
+  sock.ev.on("connection.update", async (update: Partial<import("baileys").ConnectionState>) => {
+    try {
+      const { connection, lastDisconnect, qr } = update;
+      if (qr) {
+        opts.onQr?.(qr);
+        if (printQr) {
+          console.log("Open the WhatsApp app, go to Linked Devices, then scan this QR:");
+          void printTerminalQr(qr).catch((err) => {
+            sessionLogger.warn({ error: String(err) }, "failed rendering WhatsApp QR");
+          });
         }
-        if (connection === "close") {
-          const status = getStatusCode(lastDisconnect?.error);
-          if (status === LOGGED_OUT_STATUS) {
-            console.error(
-              danger(
-                `WhatsApp session logged out. Run: ${formatCliCommand("openclaw channels login")}`,
-              ),
-            );
-          }
-        }
-        if (connection === "open" && verbose) {
-          console.log(success("WhatsApp Web connected."));
-        }
-      } catch (err) {
-        sessionLogger.error({ error: String(err) }, "connection.update handler error");
       }
-    },
-  );
+      if (connection === "close") {
+        const status = getStatusCode(lastDisconnect?.error);
+        if (status === LOGGED_OUT_STATUS) {
+          console.error(
+            danger(
+              `WhatsApp session logged out. Run: ${formatCliCommand("openclaw channels login")}`,
+            ),
+          );
+        }
+      }
+      if (connection === "open" && verbose) {
+        console.log(success("WhatsApp Web connected."));
+      }
+    } catch (err) {
+      sessionLogger.error({ error: String(err) }, "connection.update handler error");
+    }
+  });
 
   // Handle WebSocket-level errors to prevent unhandled exceptions from crashing the process
   if (sock.ws && typeof (sock.ws as unknown as { on?: unknown }).on === "function") {
@@ -209,17 +225,24 @@ export async function createWaSocket(
 async function resolveEnvProxyAgent(
   logger: ReturnType<typeof getChildLogger>,
 ): Promise<Agent | undefined> {
-  return resolveAmbientNodeProxyAgent<Agent>({
-    onError: (err) => {
-      logger.warn(
-        { error: String(err) },
-        "Failed to initialize env proxy agent for WhatsApp WebSocket connection",
-      );
-    },
-    onUsingProxy: () => {
-      logger.info("Using ambient env proxy for WhatsApp WebSocket connection");
-    },
-  });
+  if (!shouldUseEnvHttpProxyForUrl(WHATSAPP_WEBSOCKET_PROXY_TARGET)) {
+    return undefined;
+  }
+  const proxyUrl = resolveEnvHttpProxyUrl("https");
+  if (!proxyUrl) {
+    return undefined;
+  }
+  try {
+    const agent = new HttpsProxyAgent(proxyUrl) as Agent;
+    logger.info("Using ambient env proxy for WhatsApp WebSocket connection");
+    return agent;
+  } catch (error) {
+    logger.warn(
+      { error: String(error) },
+      "Failed to initialize env proxy agent for WhatsApp WebSocket connection",
+    );
+    return undefined;
+  }
 }
 
 async function resolveEnvFetchDispatcher(
@@ -282,7 +305,7 @@ export async function waitForWaConnection(sock: ReturnType<typeof makeWASocket>)
     const evWithOff = sock.ev as unknown as OffCapable;
 
     const handler = (...args: unknown[]) => {
-      const update = (args[0] ?? {}) as Partial<import("@whiskeysockets/baileys").ConnectionState>;
+      const update = (args[0] ?? {}) as Partial<import("baileys").ConnectionState>;
       if (update.connection === "open") {
         evWithOff.off?.("connection.update", handler);
         resolve();
@@ -294,32 +317,6 @@ export async function waitForWaConnection(sock: ReturnType<typeof makeWASocket>)
     };
 
     sock.ev.on("connection.update", handler);
-  });
-}
-
-/** Await pending credential saves — scoped to one authDir, or all if omitted. */
-export function waitForCredsSaveQueue(authDir?: string): Promise<void> {
-  if (authDir) {
-    return credsSaveQueues.get(authDir) ?? Promise.resolve();
-  }
-  return Promise.all(credsSaveQueues.values()).then(() => {});
-}
-
-/** Await pending credential saves, but don't hang forever on stalled I/O. */
-export async function waitForCredsSaveQueueWithTimeout(
-  authDir: string,
-  timeoutMs = CREDS_SAVE_FLUSH_TIMEOUT_MS,
-): Promise<void> {
-  let flushTimeout: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([
-    waitForCredsSaveQueue(authDir),
-    new Promise<void>((resolve) => {
-      flushTimeout = setTimeout(resolve, timeoutMs);
-    }),
-  ]).finally(() => {
-    if (flushTimeout) {
-      clearTimeout(flushTimeout);
-    }
   });
 }
 

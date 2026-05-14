@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { sanitizeForLog } from "../../../terminal/ansi.js";
 import type { AuthProfileFailureReason } from "../../auth-profiles.js";
@@ -42,6 +42,7 @@ export async function handleAssistantFailover(params: {
   timedOut: boolean;
   idleTimedOut: boolean;
   timedOutDuringCompaction: boolean;
+  timedOutDuringToolExecution: boolean;
   allowSameModelIdleTimeoutRetry: boolean;
   assistantProfileFailureReason: AuthProfileFailureReason | null;
   lastProfileId?: string;
@@ -96,22 +97,23 @@ export async function handleAssistantFailover(params: {
   };
 
   if (decision.action === "rotate_profile") {
-    if (params.lastProfileId) {
-      const reason = params.timedOut ? "timeout" : params.assistantProfileFailureReason;
-      await params.maybeMarkAuthProfileFailure({
-        profileId: params.lastProfileId,
-        reason,
-        modelId: params.modelId,
-      });
-      if (params.timedOut && !params.isProbeSession) {
-        params.warn(`Profile ${params.lastProfileId} timed out. Trying next account...`);
+    const failedProfileId = params.lastProfileId;
+    const timeoutFailure = params.timedOut || params.idleTimedOut;
+    const failureReason = timeoutFailure ? "timeout" : params.assistantProfileFailureReason;
+    const markFailedProfile = async () => {
+      if (!failedProfileId || !failureReason || failureReason === "timeout") {
+        return;
       }
-      if (params.cloudCodeAssistFormatError) {
-        params.warn(
-          `Profile ${params.lastProfileId} hit Cloud Code Assist format error. Tool calls will be sanitized on retry.`,
-        );
+      try {
+        await params.maybeMarkAuthProfileFailure({
+          profileId: failedProfileId,
+          reason: failureReason,
+          modelId: params.modelId,
+        });
+      } catch (err) {
+        params.warn(`profile failure mark failed: ${String(err)}`);
       }
-    }
+    };
 
     if (params.failoverReason === "overloaded") {
       overloadProfileRotations += 1;
@@ -123,6 +125,7 @@ export async function handleAssistantFailover(params: {
         params.warn(
           `overload profile rotation cap reached for ${sanitizeForLog(params.provider)}/${sanitizeForLog(params.modelId)} after ${overloadProfileRotations} rotations; escalating to model fallback`,
         );
+        await markFailedProfile();
         params.logAssistantFailoverDecision("fallback_model", { status });
         return {
           action: "throw",
@@ -135,6 +138,7 @@ export async function handleAssistantFailover(params: {
               model: params.activeErrorContext.model,
               profileId: params.lastProfileId,
               status,
+              rawError: params.lastAssistant?.errorMessage?.trim(),
             },
           ),
         };
@@ -150,7 +154,18 @@ export async function handleAssistantFailover(params: {
     }
 
     const rotated = await params.advanceAuthProfile();
+    const markFailedProfilePromise = markFailedProfile();
+    if (timeoutFailure && !params.isProbeSession && failedProfileId) {
+      const timeoutLabel = params.idleTimedOut ? "idle timeout (model silent)" : "timed out";
+      params.warn(`Profile ${failedProfileId} ${timeoutLabel}. Trying next account...`);
+    }
+    if (params.cloudCodeAssistFormatError && failedProfileId) {
+      params.warn(
+        `Profile ${failedProfileId} hit Cloud Code Assist format error. Tool calls will be sanitized on retry.`,
+      );
+    }
     if (rotated) {
+      void markFailedProfilePromise;
       params.logAssistantFailoverDecision("rotate_profile");
       await params.maybeBackoffBeforeOverloadFailover(params.failoverReason);
       return {
@@ -159,54 +174,41 @@ export async function handleAssistantFailover(params: {
         lastRetryFailoverReason: mergeRetryFailoverReason({
           previous: params.previousRetryFailoverReason,
           failoverReason: params.failoverReason,
-          timedOut: params.timedOut,
+          timedOut: params.timedOut || params.idleTimedOut,
         }),
       };
     }
+    await markFailedProfilePromise;
     if (params.idleTimedOut && params.allowSameModelIdleTimeoutRetry) {
       return sameModelIdleTimeoutRetry();
     }
 
     decision = resolveRunFailoverDecision({
       stage: "assistant",
+      allowFormatRetry: params.cloudCodeAssistFormatError,
       aborted: params.aborted,
       externalAbort: params.externalAbort,
       fallbackConfigured: params.fallbackConfigured,
       failoverFailure: params.failoverFailure,
       failoverReason: params.failoverReason,
       timedOut: params.timedOut,
+      idleTimedOut: params.idleTimedOut,
       timedOutDuringCompaction: params.timedOutDuringCompaction,
+      timedOutDuringToolExecution: params.timedOutDuringToolExecution,
       profileRotated: true,
     });
   }
 
   if (decision.action === "fallback_model") {
     await params.maybeBackoffBeforeOverloadFailover(params.failoverReason);
-    const message =
-      (params.lastAssistant
-        ? formatAssistantErrorText(params.lastAssistant, {
-            cfg: params.config,
-            sessionKey: params.sessionKey,
-            provider: params.activeErrorContext.provider,
-            model: params.activeErrorContext.model,
-          })
-        : undefined) ||
-      params.lastAssistant?.errorMessage?.trim() ||
-      (params.timedOut
-        ? "LLM request timed out."
-        : params.rateLimitFailure
-          ? "LLM request rate limited."
-          : params.billingFailure
-            ? formatBillingErrorMessage(
-                params.activeErrorContext.provider,
-                params.activeErrorContext.model,
-              )
-            : params.authFailure
-              ? "LLM request unauthorized."
-              : "LLM request failed.");
+    const message = resolveAssistantFailoverErrorMessage(params);
     const status =
       resolveFailoverStatus(decision.reason) ?? (isTimeoutErrorMessage(message) ? 408 : undefined);
     params.logAssistantFailoverDecision("fallback_model", { status });
+    const shouldSuspend =
+      Boolean(params.sessionKey) &&
+      (decision.reason === "rate_limit" || decision.reason === "billing");
+
     return {
       action: "throw",
       overloadProfileRotations,
@@ -216,6 +218,8 @@ export async function handleAssistantFailover(params: {
         model: params.activeErrorContext.model,
         profileId: params.lastProfileId,
         status,
+        rawError: params.lastAssistant?.errorMessage?.trim(),
+        suspend: shouldSuspend,
       }),
     };
   }
@@ -225,10 +229,115 @@ export async function handleAssistantFailover(params: {
       return sameModelIdleTimeoutRetry();
     }
     params.logAssistantFailoverDecision("surface_error");
+    // Two surface_error shapes already have downstream synthesis and
+    // must keep falling through to `continue_normal`:
+    //   1. External abort (user pressed stop) — partial assistant
+    //      output carries the turn; no provider error to synthesize.
+    //   2. Timeout without an idle-retry — run.ts emits a dedicated
+    //      timeout payload when buildEmbeddedRunPayloads produces no
+    //      assistant content (see the `timedOut &&
+    //      !timedOutDuringCompaction && !payloadsWithToolMedia.length`
+    //      block in run.ts). Throwing here would short-circuit that
+    //      synthesis and break timeout-compaction retry coverage.
+    // Every other surface_error is a concrete provider failure that
+    // continue_normal would silently drop before the payload builder
+    // sees it (openclaw#70124: billing errors reached the gateway
+    // but never the webchat because stopReason was not "error" and
+    // no other synthesis path caught them). Throw a FailoverError so
+    // the client surface can render it the same way it already
+    // renders fallback_model failures.
+    if (!params.externalAbort && !params.timedOut) {
+      const message = resolveAssistantFailoverErrorMessage(params);
+      const reason = resolveSurfaceErrorReason(decision.reason, params);
+      const status =
+        resolveFailoverStatus(reason) ?? (isTimeoutErrorMessage(message) ? 408 : undefined);
+      const shouldSuspend =
+        Boolean(params.sessionKey) && (reason === "rate_limit" || reason === "billing");
+
+      return {
+        action: "throw",
+        overloadProfileRotations,
+        error: new FailoverError(message, {
+          reason,
+          provider: params.activeErrorContext.provider,
+          model: params.activeErrorContext.model,
+          profileId: params.lastProfileId,
+          status,
+          rawError: params.lastAssistant?.errorMessage?.trim(),
+          suspend: shouldSuspend,
+        }),
+      };
+    }
   }
 
   return {
     action: "continue_normal",
     overloadProfileRotations,
   };
+}
+
+function resolveAssistantFailoverErrorMessage(params: {
+  lastAssistant: AssistantMessage | undefined;
+  config: OpenClawConfig | undefined;
+  sessionKey?: string;
+  activeErrorContext: { provider: string; model: string };
+  timedOut: boolean;
+  idleTimedOut: boolean;
+  rateLimitFailure: boolean;
+  billingFailure: boolean;
+  authFailure: boolean;
+}): string {
+  const timeoutFailure = params.timedOut || params.idleTimedOut;
+  return (
+    (params.lastAssistant
+      ? formatAssistantErrorText(params.lastAssistant, {
+          cfg: params.config,
+          sessionKey: params.sessionKey,
+          provider: params.activeErrorContext.provider,
+          model: params.activeErrorContext.model,
+        })
+      : undefined) ||
+    params.lastAssistant?.errorMessage?.trim() ||
+    (timeoutFailure
+      ? "LLM request timed out."
+      : params.rateLimitFailure
+        ? "LLM request rate limited."
+        : params.billingFailure
+          ? formatBillingErrorMessage(
+              params.activeErrorContext.provider,
+              params.activeErrorContext.model,
+            )
+          : params.authFailure
+            ? "LLM request unauthorized."
+            : "LLM request failed.")
+  );
+}
+
+// surface_error decisions can arrive with `reason: null` when
+// shouldRotateAssistant fired on `failoverFailure` without a classified
+// upstream reason. FailoverError requires a concrete reason, so map
+// null onto the most specific failure the run observed, falling back
+// to "unknown" when no signal is set. Callers only hit this helper on
+// the non-timeout throw branch, so timeouts don't need a case here.
+function resolveSurfaceErrorReason(
+  declared: FailoverReason | null,
+  params: {
+    billingFailure: boolean;
+    authFailure: boolean;
+    rateLimitFailure: boolean;
+  },
+): FailoverReason {
+  if (declared) {
+    return declared;
+  }
+  if (params.billingFailure) {
+    return "billing";
+  }
+  if (params.authFailure) {
+    return "auth";
+  }
+  if (params.rateLimitFailure) {
+    return "rate_limit";
+  }
+  return "unknown";
 }

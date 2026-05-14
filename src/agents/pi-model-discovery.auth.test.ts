@@ -1,13 +1,49 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { AuthProfileStore } from "./auth-profiles.js";
 import { resolvePiCredentialMapFromStore } from "./pi-auth-credentials.js";
 import {
   addEnvBackedPiCredentials,
-  normalizeDiscoveredPiModel,
   scrubLegacyStaticAuthJsonEntriesForDiscovery,
-} from "./pi-model-discovery.js";
+} from "./pi-auth-discovery-core.js";
+import { discoverAuthStorage } from "./pi-model-discovery.js";
+
+vi.mock("./model-auth-env-vars.js", () => ({
+  listProviderEnvAuthLookupKeys: () => ["mistral", "workspace-cloud"],
+  resolveProviderEnvApiKeyCandidates: () => ({
+    mistral: ["MISTRAL_API_KEY"],
+  }),
+  resolveProviderEnvAuthEvidence: () => ({
+    "workspace-cloud": [
+      {
+        type: "local-file-with-env",
+        credentialMarker: "workspace-cloud-local-credentials",
+        source: "workspace cloud credentials",
+      },
+    ],
+  }),
+}));
+
+vi.mock("./model-auth-env.js", () => ({
+  resolveEnvApiKey: (
+    provider: string,
+    env: NodeJS.ProcessEnv,
+    options?: { workspaceDir?: string },
+  ) => {
+    if (provider === "mistral" && env.MISTRAL_API_KEY?.trim()) {
+      return { apiKey: env.MISTRAL_API_KEY, source: "env: MISTRAL_API_KEY" };
+    }
+    if (provider === "workspace-cloud" && options?.workspaceDir === "/tmp/workspace") {
+      return {
+        apiKey: "workspace-cloud-local-credentials",
+        source: "workspace cloud credentials",
+      };
+    }
+    return null;
+  },
+}));
 
 async function createAgentDir(): Promise<string> {
   return await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-pi-auth-storage-"));
@@ -27,6 +63,10 @@ async function writeLegacyAuthJson(
   authEntries: Record<string, unknown>,
 ): Promise<void> {
   await fs.writeFile(path.join(agentDir, "auth.json"), JSON.stringify(authEntries, null, 2));
+}
+
+async function writeAuthProfilesJson(agentDir: string, store: AuthProfileStore): Promise<void> {
+  await fs.writeFile(path.join(agentDir, "auth-profiles.json"), JSON.stringify(store, null, 2));
 }
 
 async function readLegacyAuthJson(agentDir: string): Promise<Record<string, unknown>> {
@@ -69,10 +109,93 @@ describe("discoverAuthStorage", () => {
       type: "api_key",
       key: "sk-ant-runtime",
     });
-    expect(credentials["openai-codex"]).toMatchObject({
-      type: "oauth",
-      access: "oauth-access",
-      refresh: "oauth-refresh",
+    const codexCredential = credentials["openai-codex"] as
+      | { type?: string; access?: string; refresh?: string }
+      | undefined;
+    expect(codexCredential?.type).toBe("oauth");
+    expect(codexCredential?.access).toBe("oauth-access");
+    expect(codexCredential?.refresh).toBe("oauth-refresh");
+  });
+
+  it("keeps keyRef and tokenRef profiles visible only for read-only pi discovery", () => {
+    const credentials = resolvePiCredentialMapFromStore({
+      version: 1,
+      profiles: {
+        "openrouter:default": {
+          type: "api_key",
+          provider: "openrouter",
+          keyRef: { source: "exec", provider: "keychain", id: "OPENROUTER_API_KEY" },
+        },
+        "anthropic:default": {
+          type: "token",
+          provider: "anthropic",
+          tokenRef: { source: "env", provider: "default", id: "ANTHROPIC_AUTH_TOKEN" },
+        },
+        "expired:default": {
+          type: "token",
+          provider: "expired",
+          tokenRef: { source: "env", provider: "default", id: "EXPIRED_AUTH_TOKEN" },
+          expires: Date.now() - 1_000,
+        },
+      },
+    });
+    const discoveryCredentials = resolvePiCredentialMapFromStore(
+      {
+        version: 1,
+        profiles: {
+          "openrouter:default": {
+            type: "api_key",
+            provider: "openrouter",
+            keyRef: { source: "exec", provider: "keychain", id: "OPENROUTER_API_KEY" },
+          },
+          "anthropic:default": {
+            type: "token",
+            provider: "anthropic",
+            tokenRef: { source: "env", provider: "default", id: "ANTHROPIC_AUTH_TOKEN" },
+          },
+          "expired:default": {
+            type: "token",
+            provider: "expired",
+            tokenRef: { source: "env", provider: "default", id: "EXPIRED_AUTH_TOKEN" },
+            expires: Date.now() - 1_000,
+          },
+        },
+      },
+      { includeSecretRefPlaceholders: true },
+    );
+
+    expect(credentials.openrouter).toBeUndefined();
+    expect(credentials.anthropic).toBeUndefined();
+    expect(discoveryCredentials.openrouter?.type).toBe("api_key");
+    expect(discoveryCredentials.anthropic?.type).toBe("api_key");
+    expect(discoveryCredentials.expired).toBeUndefined();
+  });
+
+  it("marks keyRef-only auth profiles configured for read-only model discovery", async () => {
+    await withAgentDir(async (agentDir) => {
+      await writeAuthProfilesJson(agentDir, {
+        version: 1,
+        profiles: {
+          "fixture-ref-provider:default": {
+            type: "api_key",
+            provider: "fixture-ref-provider",
+            keyRef: { source: "exec", provider: "keychain", id: "FIXTURE_API_KEY" },
+          },
+        },
+      });
+
+      const readOnlyStorage = discoverAuthStorage(agentDir, {
+        readOnly: true,
+        skipExternalAuthProfiles: true,
+        env: {},
+      });
+      const runtimeStorage = discoverAuthStorage(agentDir, {
+        skipExternalAuthProfiles: true,
+        env: {},
+      });
+
+      expect(readOnlyStorage.hasAuth("fixture-ref-provider")).toBe(true);
+      expect(runtimeStorage.hasAuth("fixture-ref-provider")).toBe(false);
     });
   });
 
@@ -92,10 +215,9 @@ describe("discoverAuthStorage", () => {
 
       const parsed = await readLegacyAuthJson(agentDir);
       expect(parsed.openrouter).toBeUndefined();
-      expect(parsed["openai-codex"]).toMatchObject({
-        type: "oauth",
-        access: "oauth-access",
-      });
+      const codexEntry = parsed["openai-codex"] as { type?: string; access?: string } | undefined;
+      expect(codexEntry?.type).toBe("oauth");
+      expect(codexEntry?.access).toBe("oauth-access");
     });
   });
 
@@ -111,7 +233,9 @@ describe("discoverAuthStorage", () => {
         scrubLegacyStaticAuthJsonEntriesForDiscovery(path.join(agentDir, "auth.json"));
 
         const parsed = await readLegacyAuthJson(agentDir);
-        expect(parsed.openrouter).toMatchObject({ type: "api_key", key: "legacy-static-key" });
+        const openrouterEntry = parsed.openrouter as { type?: string; key?: string } | undefined;
+        expect(openrouterEntry?.type).toBe("api_key");
+        expect(openrouterEntry?.key).toBe("legacy-static-key");
       } finally {
         if (previous === undefined) {
           delete process.env.OPENCLAW_AUTH_STORE_READONLY;
@@ -122,7 +246,7 @@ describe("discoverAuthStorage", () => {
     });
   });
 
-  it("includes env-backed provider auth when no auth profile exists", async () => {
+  it("includes env-backed provider auth when no auth profile exists", () => {
     const previousMistral = process.env.MISTRAL_API_KEY;
     const previousBundledPluginsDir = process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
     const previousDisableBundledPlugins = process.env.OPENCLAW_DISABLE_BUNDLED_PLUGINS;
@@ -130,7 +254,7 @@ describe("discoverAuthStorage", () => {
     delete process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
     delete process.env.OPENCLAW_DISABLE_BUNDLED_PLUGINS;
     try {
-      const credentials = addEnvBackedPiCredentials({}, process.env);
+      const credentials = addEnvBackedPiCredentials({}, { env: process.env });
 
       expect(credentials.mistral).toEqual({
         type: "api_key",
@@ -155,56 +279,18 @@ describe("discoverAuthStorage", () => {
     }
   });
 
-  it("normalizes stale discovered openai-codex rows when api metadata is missing", () => {
-    const normalized = normalizeDiscoveredPiModel(
+  it("includes workspace-scoped auth evidence in pi discovery credentials", () => {
+    const credentials = addEnvBackedPiCredentials(
+      {},
       {
-        id: "gpt-5.4",
-        name: "gpt-5.4",
-        provider: "openai-codex",
-        baseUrl: "https://chatgpt.com/backend-api",
-        reasoning: true,
-        input: ["text", "image"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 1_050_000,
-        contextTokens: 272_000,
-        maxTokens: 128_000,
+        env: {},
+        workspaceDir: "/tmp/workspace",
       },
-      "/tmp/agent",
-    ) as {
-      api?: string;
-      baseUrl?: string;
-    };
+    );
 
-    expect(normalized).toMatchObject({
-      api: "openai-codex-responses",
-      baseUrl: "https://chatgpt.com/backend-api",
-    });
-  });
-
-  it("canonicalizes stale discovered openai-codex backend-api/v1 rows", () => {
-    const normalized = normalizeDiscoveredPiModel(
-      {
-        id: "gpt-5.4",
-        name: "gpt-5.4",
-        provider: "openai-codex",
-        api: "openai-codex-responses",
-        baseUrl: "https://chatgpt.com/backend-api/v1",
-        reasoning: true,
-        input: ["text", "image"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 1_050_000,
-        contextTokens: 272_000,
-        maxTokens: 128_000,
-      },
-      "/tmp/agent",
-    ) as {
-      api?: string;
-      baseUrl?: string;
-    };
-
-    expect(normalized).toMatchObject({
-      api: "openai-codex-responses",
-      baseUrl: "https://chatgpt.com/backend-api",
+    expect(credentials["workspace-cloud"]).toEqual({
+      type: "api_key",
+      key: "workspace-cloud-local-credentials",
     });
   });
 });

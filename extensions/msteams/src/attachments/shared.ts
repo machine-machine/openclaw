@@ -1,7 +1,5 @@
 import { Buffer } from "node:buffer";
 import { lookup } from "node:dns/promises";
-export { estimateBase64DecodedBytes } from "openclaw/plugin-sdk/media-runtime";
-import { estimateBase64DecodedBytes } from "openclaw/plugin-sdk/media-runtime";
 import {
   buildHostnameAllowlistPolicyFromSuffixAllowlist,
   isHttpsUrlAllowedByHostnameSuffixAllowlist,
@@ -13,7 +11,7 @@ import {
   isRecord,
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "openclaw/plugin-sdk/text-runtime";
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { MSTeamsAttachmentLike } from "./types.js";
 
 type InlineImageCandidate =
@@ -36,12 +34,12 @@ type InlineImageLimitOptions = {
   maxInlineTotalBytes?: number;
 };
 
-export const IMAGE_EXT_RE = /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i;
+const IMAGE_EXT_RE = /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i;
 
 export const IMG_SRC_RE = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
 export const ATTACHMENT_TAG_RE = /<attachment[^>]+id=["']([^"']+)["'][^>]*>/gi;
 
-export const DEFAULT_MEDIA_HOST_ALLOWLIST = [
+const DEFAULT_MEDIA_HOST_ALLOWLIST = [
   "graph.microsoft.com",
   "graph.microsoft.us",
   "graph.microsoft.de",
@@ -69,7 +67,7 @@ export const DEFAULT_MEDIA_HOST_ALLOWLIST = [
   "microsoft.com",
 ] as const;
 
-export const DEFAULT_MEDIA_AUTH_HOST_ALLOWLIST = [
+const DEFAULT_MEDIA_AUTH_HOST_ALLOWLIST = [
   "api.botframework.com",
   "botframework.com",
   // Bot Framework Service URL (smba.trafficmanager.net) used for outbound
@@ -83,6 +81,42 @@ export const DEFAULT_MEDIA_AUTH_HOST_ALLOWLIST = [
 
 export const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 export { isRecord };
+
+// Keep this local; importing the broad media-runtime SDK barrel pulls image/audio runtimes into
+// hot MSTeams attachment tests for one tiny estimator.
+export function estimateBase64DecodedBytes(base64: string): number {
+  let effectiveLen = 0;
+  for (let i = 0; i < base64.length; i += 1) {
+    const code = base64.charCodeAt(i);
+    if (code <= 0x20) {
+      continue;
+    }
+    effectiveLen += 1;
+  }
+
+  if (effectiveLen === 0) {
+    return 0;
+  }
+
+  let padding = 0;
+  let end = base64.length - 1;
+  while (end >= 0 && base64.charCodeAt(end) <= 0x20) {
+    end -= 1;
+  }
+  if (end >= 0 && base64[end] === "=") {
+    padding = 1;
+    end -= 1;
+    while (end >= 0 && base64.charCodeAt(end) <= 0x20) {
+      end -= 1;
+    }
+    if (end >= 0 && base64[end] === "=") {
+      padding = 2;
+    }
+  }
+
+  const estimated = Math.floor((effectiveLen * 3) / 4) - padding;
+  return Math.max(0, estimated);
+}
 
 /**
  * Host suffixes for SharePoint/OneDrive shared links that must be fetched via
@@ -273,8 +307,36 @@ export function extractHtmlFromAttachment(att: MSTeamsAttachmentLike): string | 
   return text;
 }
 
-function isLikelyBase64Payload(value: string): boolean {
-  return /^[A-Za-z0-9+/=\r\n]+$/.test(value);
+function canonicalizeInlineBase64Payload(value: string): string | undefined {
+  let cleaned = "";
+  let padding = 0;
+  let sawPadding = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x20) {
+      continue;
+    }
+    if (code === 0x3d) {
+      padding += 1;
+      if (padding > 2) {
+        return undefined;
+      }
+      sawPadding = true;
+      cleaned += "=";
+      continue;
+    }
+    const isDataChar =
+      (code >= 0x41 && code <= 0x5a) ||
+      (code >= 0x61 && code <= 0x7a) ||
+      (code >= 0x30 && code <= 0x39) ||
+      code === 0x2b ||
+      code === 0x2f;
+    if (sawPadding || !isDataChar) {
+      return undefined;
+    }
+    cleaned += value[index];
+  }
+  return cleaned && cleaned.length % 4 === 0 ? cleaned : undefined;
 }
 
 function decodeDataImageWithLimits(
@@ -291,11 +353,12 @@ function decodeDataImageWithLimits(
     return { candidate: null, estimatedBytes: 0 };
   }
   const payload = match[3] ?? "";
-  if (!payload || !isLikelyBase64Payload(payload)) {
+  const canonicalPayload = canonicalizeInlineBase64Payload(payload);
+  if (!canonicalPayload) {
     return { candidate: null, estimatedBytes: 0 };
   }
 
-  const estimatedBytes = estimateBase64DecodedBytes(payload);
+  const estimatedBytes = estimateBase64DecodedBytes(canonicalPayload);
   if (estimatedBytes <= 0) {
     return { candidate: null, estimatedBytes: 0 };
   }
@@ -304,7 +367,7 @@ function decodeDataImageWithLimits(
   }
 
   try {
-    const data = Buffer.from(payload, "base64");
+    const data = Buffer.from(canonicalPayload, "base64");
     return {
       candidate: { kind: "data", data, contentType, placeholder: "<media:image>" },
       estimatedBytes,

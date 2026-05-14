@@ -1,4 +1,7 @@
 [
+  "qa-channel",
+  "qa-channel-protocol",
   "qa-lab",
-  "qa-runtime"
+  "qa-runtime",
+  "test-utils"
 ]

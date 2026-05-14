@@ -1,13 +1,23 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
+
+const { resolveChannelMessageToolMediaSourceParamKeysMock } = vi.hoisted(() => ({
+  resolveChannelMessageToolMediaSourceParamKeysMock: vi.fn(() => ["avatarPath", "avatarUrl"]),
+}));
+
+vi.mock("../../channels/plugins/message-action-discovery.js", () => ({
+  resolveChannelMessageToolMediaSourceParamKeys: resolveChannelMessageToolMediaSourceParamKeysMock,
+}));
+
 import {
   collectActionMediaSourceHints,
   hydrateAttachmentParamsForAction,
   normalizeSandboxMediaList,
   normalizeSandboxMediaParams,
+  resolveExtraActionMediaSourceParamKeys,
   resolveAttachmentMediaPolicy,
 } from "./message-action-params.js";
 
@@ -16,6 +26,52 @@ const maybeIt = process.platform === "win32" ? it.skip : it;
 const matrixMediaSourceParamKeys = ["avatarPath", "avatarUrl"] as const;
 
 describe("message action media helpers", () => {
+  beforeEach(() => {
+    resolveChannelMessageToolMediaSourceParamKeysMock.mockClear();
+  });
+
+  it("skips plugin media discovery when args only use standard action params", () => {
+    expect(
+      resolveExtraActionMediaSourceParamKeys({
+        cfg,
+        action: "send",
+        channel: "workspace",
+        args: {
+          channel: "workspace",
+          target: "#C12345678",
+          message: "hi",
+          media: "https://example.com/photo.png",
+        },
+      }),
+    ).toStrictEqual([]);
+    expect(resolveChannelMessageToolMediaSourceParamKeysMock).not.toHaveBeenCalled();
+  });
+
+  it("discovers plugin media params when args include an extension-owned field", () => {
+    expect(
+      resolveExtraActionMediaSourceParamKeys({
+        cfg,
+        action: "set-profile",
+        channel: "matrix",
+        args: {
+          channel: "matrix",
+          avatarPath: "/workspace/avatars/profile.png",
+        },
+      }),
+    ).toEqual(["avatarPath", "avatarUrl"]);
+    expect(resolveChannelMessageToolMediaSourceParamKeysMock).toHaveBeenCalledWith({
+      cfg,
+      action: "set-profile",
+      channel: "matrix",
+      accountId: undefined,
+      sessionKey: undefined,
+      sessionId: undefined,
+      agentId: undefined,
+      requesterSenderId: undefined,
+      senderIsOwner: undefined,
+    });
+  });
+
   it("prefers sandbox media policy when sandbox roots are non-blank", () => {
     expect(
       resolveAttachmentMediaPolicy({
@@ -92,16 +148,14 @@ describe("message action media helpers", () => {
         },
       });
 
-      expect(args).toMatchObject({
-        mediaUrl: path.join(sandboxRoot, "assets", "photo.png"),
-        fileUrl: path.join(sandboxRoot, "docs", "report.pdf"),
-      });
+      expect(args.mediaUrl).toBe(path.join(sandboxRoot, "assets", "photo.png"));
+      expect(args.fileUrl).toBe(path.join(sandboxRoot, "docs", "report.pdf"));
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }
   });
 
-  maybeIt("normalizes Discord event image sandbox media params", async () => {
+  maybeIt("normalizes extension event image sandbox media params", async () => {
     const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "msg-params-image-"));
     try {
       const args: Record<string, unknown> = {
@@ -116,15 +170,13 @@ describe("message action media helpers", () => {
         },
       });
 
-      expect(args).toMatchObject({
-        image: path.join(sandboxRoot, "assets", "event-cover.png"),
-      });
+      expect(args.image).toBe(path.join(sandboxRoot, "assets", "event-cover.png"));
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }
   });
 
-  maybeIt("normalizes Matrix avatarPath and avatarUrl sandbox media params", async () => {
+  maybeIt("normalizes extension avatarPath and avatarUrl sandbox media params", async () => {
     const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "msg-params-avatar-"));
     try {
       const args: Record<string, unknown> = {
@@ -141,10 +193,8 @@ describe("message action media helpers", () => {
         extraParamKeys: matrixMediaSourceParamKeys,
       });
 
-      expect(args).toMatchObject({
-        avatarPath: path.join(sandboxRoot, "avatars", "profile.png"),
-        avatarUrl: path.join(sandboxRoot, "avatars", "remote-avatar.jpg"),
-      });
+      expect(args.avatarPath).toBe(path.join(sandboxRoot, "avatars", "profile.png"));
+      expect(args.avatarUrl).toBe(path.join(sandboxRoot, "avatars", "remote-avatar.jpg"));
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }
@@ -171,7 +221,7 @@ describe("message action media helpers", () => {
     ]);
   });
 
-  maybeIt("normalizes Matrix snake_case avatar_path and avatar_url aliases", async () => {
+  maybeIt("normalizes extension snake_case avatar_path and avatar_url aliases", async () => {
     const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "msg-params-avatar-snake-"));
     try {
       const args: Record<string, unknown> = {
@@ -188,16 +238,14 @@ describe("message action media helpers", () => {
         extraParamKeys: matrixMediaSourceParamKeys,
       });
 
-      expect(args).toMatchObject({
-        avatar_path: path.join(sandboxRoot, "avatars", "profile.png"),
-        avatar_url: path.join(sandboxRoot, "avatars", "remote-avatar.jpg"),
-      });
+      expect(args.avatar_path).toBe(path.join(sandboxRoot, "avatars", "profile.png"));
+      expect(args.avatar_url).toBe(path.join(sandboxRoot, "avatars", "remote-avatar.jpg"));
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }
   });
 
-  maybeIt("prefers canonical Matrix media params over invalid snake_case aliases", async () => {
+  maybeIt("prefers canonical extension media params over invalid snake_case aliases", async () => {
     const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), "msg-params-avatar-canonical-"));
     try {
       const args: Record<string, unknown> = {
@@ -216,12 +264,10 @@ describe("message action media helpers", () => {
         extraParamKeys: matrixMediaSourceParamKeys,
       });
 
-      expect(args).toMatchObject({
-        avatarUrl: "https://example.com/avatars/profile.png",
-        avatarPath: path.join(sandboxRoot, "avatars", "profile.png"),
-        avatar_url: "data:text/plain;base64,QQ==",
-        avatar_path: "data:text/plain;base64,QQ==",
-      });
+      expect(args.avatarUrl).toBe("https://example.com/avatars/profile.png");
+      expect(args.avatarPath).toBe(path.join(sandboxRoot, "avatars", "profile.png"));
+      expect(args.avatar_url).toBe("data:text/plain;base64,QQ==");
+      expect(args.avatar_path).toBe("data:text/plain;base64,QQ==");
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }
@@ -244,10 +290,8 @@ describe("message action media helpers", () => {
         extraParamKeys: matrixMediaSourceParamKeys,
       });
 
-      expect(args).toMatchObject({
-        avatarUrl: "https://example.com/avatars/profile.png",
-        avatarPath: path.join(sandboxRoot, "avatars", "local.png"),
-      });
+      expect(args.avatarUrl).toBe("https://example.com/avatars/profile.png");
+      expect(args.avatarPath).toBe(path.join(sandboxRoot, "avatars", "local.png"));
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }
@@ -270,10 +314,8 @@ describe("message action media helpers", () => {
         extraParamKeys: matrixMediaSourceParamKeys,
       });
 
-      expect(args).toMatchObject({
-        avatarUrl: "mxc://matrix.org/abc123def456",
-        avatarPath: path.join(sandboxRoot, "avatars", "local.png"),
-      });
+      expect(args.avatarUrl).toBe("mxc://matrix.org/abc123def456");
+      expect(args.avatarPath).toBe(path.join(sandboxRoot, "avatars", "local.png"));
     } finally {
       await fs.rm(sandboxRoot, { recursive: true, force: true });
     }
@@ -297,10 +339,8 @@ describe("message action media helpers", () => {
           },
         });
 
-        expect(args).toMatchObject({
-          mediaUrl: "https://example.com/assets/photo.png?sig=1",
-          fileUrl: "https://example.com/docs/report.pdf?sig=2",
-        });
+        expect(args.mediaUrl).toBe("https://example.com/assets/photo.png?sig=1");
+        expect(args.fileUrl).toBe("https://example.com/docs/report.pdf?sig=2");
       } finally {
         await fs.rm(sandboxRoot, { recursive: true, force: true });
       }
@@ -313,7 +353,7 @@ describe("message action media helpers", () => {
     };
     await hydrateAttachmentParamsForAction({
       cfg,
-      channel: "slack",
+      channel: "workspace",
       args: mediaArgs,
       action: "sendAttachment",
       dryRun: true,
@@ -326,13 +366,30 @@ describe("message action media helpers", () => {
     };
     await hydrateAttachmentParamsForAction({
       cfg,
-      channel: "slack",
+      channel: "workspace",
       args: fileArgs,
       action: "sendAttachment",
       dryRun: true,
       mediaPolicy: { mode: "host" },
     });
     expect(fileArgs.filename).toBe("report.pdf");
+  });
+
+  it("uses only the leaf filename from Windows-style attachment hints", async () => {
+    const args: Record<string, unknown> = {
+      fileUrl: String.raw`C:\Users\Ada\Downloads\report.pdf`,
+    };
+
+    await hydrateAttachmentParamsForAction({
+      cfg,
+      channel: "workspace",
+      args,
+      action: "sendAttachment",
+      dryRun: true,
+      mediaPolicy: { mode: "host" },
+    });
+
+    expect(args.filename).toBe("report.pdf");
   });
 
   it("falls back to extension-based attachment names for remote-host file URLs", async () => {
@@ -342,7 +399,7 @@ describe("message action media helpers", () => {
 
     await hydrateAttachmentParamsForAction({
       cfg,
-      channel: "slack",
+      channel: "workspace",
       args,
       action: "sendAttachment",
       dryRun: true,
@@ -350,6 +407,50 @@ describe("message action media helpers", () => {
     });
 
     expect(args.filename).toBe("attachment");
+  });
+
+  it("hydrates reply attachments through the resolver so threaded sends don't bypass mediaLocalRoots", async () => {
+    // Locks in coverage for the reply-with-attachment path: when an agent
+    // calls message(action: "reply") with a `path`/`media`/etc., the
+    // resolver — not the channel runtime — must run. Pre-PR this was
+    // gated only on sendAttachment/setGroupIcon/upload-file, letting
+    // imessage reply forward an arbitrary host path to imsg.
+    const args: Record<string, unknown> = {
+      mediaUrl: "https://example.com/cute.png",
+    };
+
+    await hydrateAttachmentParamsForAction({
+      cfg,
+      channel: "imessage",
+      args,
+      action: "reply",
+      dryRun: true,
+      mediaPolicy: { mode: "host" },
+    });
+
+    expect(args.filename).toBe("cute.png");
+  });
+
+  it("does not fall back caption->message on reply (reply has its own text field)", async () => {
+    // sendAttachment uses caption as the body text and falls back from
+    // message -> caption when the agent only supplied `message`. Reply has
+    // its own `text`/`message` field, so caption fallback would invent a
+    // bogus caption param on the reply payload.
+    const args: Record<string, unknown> = {
+      mediaUrl: "https://example.com/cute.png",
+      message: "🦞",
+    };
+
+    await hydrateAttachmentParamsForAction({
+      cfg,
+      channel: "imessage",
+      args,
+      action: "reply",
+      dryRun: true,
+      mediaPolicy: { mode: "host" },
+    });
+
+    expect(args.caption).toBeUndefined();
   });
 });
 
@@ -385,7 +486,7 @@ describe("message action sandbox media hydration", () => {
       await expect(
         hydrateAttachmentParamsForAction({
           cfg,
-          channel: "slack",
+          channel: "workspace",
           args,
           action: "sendAttachment",
           mediaPolicy,
