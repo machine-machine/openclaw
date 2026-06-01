@@ -1,8 +1,8 @@
-import type { MsgContext } from "../auto-reply/templating.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "../shared/string-coerce.js";
+} from "@openclaw/normalization-core/string-coerce";
+import type { MsgContext } from "../auto-reply/templating.js";
 import { normalizeChatType } from "./chat-type.js";
 
 function extractConversationId(from?: string): string | undefined {
@@ -18,7 +18,7 @@ function shouldAppendId(id: string): boolean {
   if (/^[0-9]+$/.test(id)) {
     return true;
   }
-  if (id.includes("@g.us")) {
+  if (/^[^\s:@]+@[^\s:@]+$/.test(id)) {
     return true;
   }
   return false;

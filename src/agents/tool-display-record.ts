@@ -1,3 +1,1 @@
-export type ArgsRecord = Record<string, unknown>;
-
-export { asOptionalObjectRecord as asRecord } from "../shared/record-coerce.js";
+export { asOptionalObjectRecord as asRecord } from "../../packages/normalization-core/src/record-coerce.js";

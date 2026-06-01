@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import { uniqueStrings, uniqueValues } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { MatrixQaObservedEvent } from "./events.js";
 import { requestMatrixJson, type MatrixQaFetchLike } from "./request.js";
 import {
@@ -9,7 +10,6 @@ import {
   waitForMatrixQaRoomEvent,
   waitForOptionalMatrixQaRoomEvent,
   type MatrixQaRoomObserver,
-  type MatrixQaRoomEventWaitResult,
 } from "./sync.js";
 import {
   findMatrixQaProvisionedRoom,
@@ -19,8 +19,7 @@ import {
   type MatrixQaTopologySpec,
 } from "./topology.js";
 
-export type { MatrixQaObservedEvent } from "./events.js";
-export type { MatrixQaRoomEventWaitResult, MatrixQaRoomObserver } from "./sync.js";
+export type { MatrixQaRoomObserver } from "./sync.js";
 
 type MatrixQaAuthStage = "m.login.dummy" | "m.login.registration_token";
 
@@ -30,6 +29,8 @@ type MatrixQaRegisterResponse = {
   user_id?: string;
 };
 
+type MatrixQaLoginResponse = MatrixQaRegisterResponse;
+
 type MatrixQaRoomCreateResponse = {
   room_id?: string;
 };
@@ -38,17 +39,23 @@ type MatrixQaSendMessageContent = {
   body: string;
   format?: "org.matrix.custom.html";
   formatted_body?: string;
+  "m.new_content"?: MatrixQaSendMessageContent;
   "m.mentions"?: {
     user_ids?: string[];
   };
-  "m.relates_to"?: {
-    rel_type: "m.thread";
-    event_id: string;
-    is_falling_back: true;
-    "m.in_reply_to": {
-      event_id: string;
-    };
-  };
+  "m.relates_to"?:
+    | {
+        rel_type: "m.thread";
+        event_id: string;
+        is_falling_back: true;
+        "m.in_reply_to": {
+          event_id: string;
+        };
+      }
+    | {
+        rel_type: "m.replace";
+        event_id: string;
+      };
   msgtype: "m.text";
 };
 
@@ -72,13 +79,19 @@ type MatrixQaSendReactionContent = {
   };
 };
 
+type MatrixQaRoomInitialState = Array<{
+  content: Record<string, unknown>;
+  state_key: string;
+  type: string;
+}>;
+
 type MatrixQaUiaaResponse = {
   completed?: string[];
   flows?: Array<{ stages?: string[] }>;
   session?: string;
 };
 
-export type MatrixQaRegisteredAccount = {
+type MatrixQaRegisteredAccount = {
   accessToken: string;
   deviceId?: string;
   localpart: string;
@@ -107,6 +120,19 @@ function buildMatrixThreadRelation(threadRootEventId: string, replyToEventId?: s
   };
 }
 
+function buildMatrixReplacementRelation(targetEventId: string) {
+  const normalizedTargetEventId = targetEventId.trim();
+  if (!normalizedTargetEventId) {
+    throw new Error("Matrix replacement requires a target event id");
+  }
+  return {
+    "m.relates_to": {
+      rel_type: "m.replace" as const,
+      event_id: normalizedTargetEventId,
+    },
+  };
+}
+
 function buildMatrixReactionRelation(
   messageId: string,
   emoji: string,
@@ -126,6 +152,24 @@ function buildMatrixReactionRelation(
       key: normalizedEmoji,
     },
   };
+}
+
+function buildMatrixQaRoomInitialState(encrypted?: boolean): MatrixQaRoomInitialState {
+  const initialState: MatrixQaRoomInitialState = [
+    {
+      type: "m.room.history_visibility",
+      state_key: "",
+      content: { history_visibility: "joined" },
+    },
+  ];
+  if (encrypted === true) {
+    initialState.push({
+      type: "m.room.encryption",
+      state_key: "",
+      content: { algorithm: "m.megolm.v1.aes-sha2" },
+    });
+  }
+  return initialState;
 }
 
 function escapeMatrixHtml(value: string): string {
@@ -153,14 +197,14 @@ function buildMatrixMentionLink(userId: string) {
   return `<a href="${href}">${label}</a>`;
 }
 
-function buildMatrixQaMessageContent(params: {
+export function buildMatrixQaMessageContent(params: {
   body: string;
   mentionUserIds?: string[];
   replyToEventId?: string;
   threadRootEventId?: string;
 }): MatrixQaSendMessageContent {
   const body = params.body;
-  const uniqueMentionUserIds = [...new Set(params.mentionUserIds?.filter(Boolean) ?? [])];
+  const uniqueMentionUserIds = uniqueStrings(params.mentionUserIds?.filter(Boolean) ?? []);
   const formattedParts: string[] = [];
   let cursor = 0;
   let usedFormattedMention = false;
@@ -198,6 +242,23 @@ function buildMatrixQaMessageContent(params: {
     ...(params.threadRootEventId
       ? buildMatrixThreadRelation(params.threadRootEventId, params.replyToEventId)
       : {}),
+  };
+}
+
+function buildMatrixQaReplacementMessageContent(params: {
+  body: string;
+  mentionUserIds?: string[];
+  targetEventId: string;
+}): MatrixQaSendMessageContent {
+  const newContent = buildMatrixQaMessageContent({
+    body: params.body,
+    mentionUserIds: params.mentionUserIds,
+  });
+  return {
+    body: `* ${params.body}`,
+    msgtype: "m.text",
+    "m.new_content": newContent,
+    ...buildMatrixReplacementRelation(params.targetEventId),
   };
 }
 
@@ -291,7 +352,7 @@ async function uploadMatrixQaContent(params: {
   return contentUri;
 }
 
-export function resolveNextRegistrationAuth(params: {
+function resolveNextRegistrationAuth(params: {
   registrationToken: string;
   response: MatrixQaUiaaResponse;
 }) {
@@ -361,6 +422,14 @@ function buildRegisteredAccount(params: {
   } satisfies MatrixQaRegisteredAccount;
 }
 
+function resolveMatrixQaLoginUser(params: { localpart?: string; userId?: string }) {
+  const user = params.userId?.trim() || params.localpart?.trim();
+  if (!user) {
+    throw new Error("Matrix password login requires a localpart or userId.");
+  }
+  return user;
+}
+
 export function createMatrixQaClient(params: {
   accessToken?: string;
   baseUrl: string;
@@ -369,21 +438,35 @@ export function createMatrixQaClient(params: {
 }) {
   const fetchImpl = params.fetchImpl ?? fetch;
   const syncObserver = params.syncObserver;
+  const sendEvent = async (opts: { body: unknown; endpoint: string; errorLabel: string }) => {
+    const result = await requestMatrixJson<{ event_id?: string }>({
+      accessToken: params.accessToken,
+      baseUrl: params.baseUrl,
+      body: opts.body,
+      endpoint: opts.endpoint,
+      fetchImpl,
+      method: "PUT",
+    });
+    const eventId = result.body.event_id?.trim();
+    if (!eventId) {
+      throw new Error(`Matrix ${opts.errorLabel} did not return event_id.`);
+    }
+    return eventId;
+  };
 
   return {
-    async createPrivateRoom(opts: { inviteUserIds: string[]; isDirect?: boolean; name: string }) {
+    async createPrivateRoom(opts: {
+      encrypted?: boolean;
+      inviteUserIds: string[];
+      isDirect?: boolean;
+      name: string;
+    }) {
       const result = await requestMatrixJson<MatrixQaRoomCreateResponse>({
         accessToken: params.accessToken,
         baseUrl: params.baseUrl,
         body: {
           creation_content: { "m.federate": false },
-          initial_state: [
-            {
-              type: "m.room.history_visibility",
-              state_key: "",
-              content: { history_visibility: "joined" },
-            },
-          ],
+          initial_state: buildMatrixQaRoomInitialState(opts.encrypted),
           invite: opts.inviteUserIds,
           is_direct: opts.isDirect === true,
           name: opts.name,
@@ -451,6 +534,34 @@ export function createMatrixQaClient(params: {
         `Matrix registration for ${opts.localpart} did not complete after 4 attempts.`,
       );
     },
+    async loginWithPassword(opts: {
+      deviceName: string;
+      localpart?: string;
+      password: string;
+      userId?: string;
+    }) {
+      const result = await requestMatrixJson<MatrixQaLoginResponse>({
+        baseUrl: params.baseUrl,
+        body: {
+          type: "m.login.password",
+          identifier: {
+            type: "m.id.user",
+            user: resolveMatrixQaLoginUser(opts),
+          },
+          initial_device_display_name: opts.deviceName,
+          password: opts.password,
+        },
+        endpoint: "/_matrix/client/v3/login",
+        fetchImpl,
+        method: "POST",
+        timeoutMs: 30_000,
+      });
+      return buildRegisteredAccount({
+        localpart: opts.localpart ?? opts.userId ?? "",
+        password: opts.password,
+        response: result.body,
+      });
+    },
     async sendTextMessage(opts: {
       body: string;
       mentionUserIds?: string[];
@@ -459,19 +570,24 @@ export function createMatrixQaClient(params: {
       threadRootEventId?: string;
     }) {
       const txnId = randomUUID();
-      const result = await requestMatrixJson<{ event_id?: string }>({
-        accessToken: params.accessToken,
-        baseUrl: params.baseUrl,
+      return await sendEvent({
         body: buildMatrixQaMessageContent(opts),
         endpoint: `/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
-        fetchImpl,
-        method: "PUT",
+        errorLabel: "sendMessage",
       });
-      const eventId = result.body.event_id?.trim();
-      if (!eventId) {
-        throw new Error("Matrix sendMessage did not return event_id.");
-      }
-      return eventId;
+    },
+    async sendReplacementMessage(opts: {
+      body: string;
+      mentionUserIds?: string[];
+      roomId: string;
+      targetEventId: string;
+    }) {
+      const txnId = randomUUID();
+      return await sendEvent({
+        body: buildMatrixQaReplacementMessageContent(opts),
+        endpoint: `/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
+        errorLabel: "sendReplacementMessage",
+      });
     },
     async sendMediaMessage(opts: {
       body?: string;
@@ -493,9 +609,7 @@ export function createMatrixQaClient(params: {
         fileName: opts.fileName,
       });
       const txnId = randomUUID();
-      const result = await requestMatrixJson<{ event_id?: string }>({
-        accessToken: params.accessToken,
-        baseUrl: params.baseUrl,
+      return await sendEvent({
         body: buildMatrixQaMediaMessageContent({
           body: opts.body,
           contentType: opts.contentType,
@@ -508,30 +622,25 @@ export function createMatrixQaClient(params: {
           url: contentUri,
         }),
         endpoint: `/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`,
-        fetchImpl,
-        method: "PUT",
+        errorLabel: "sendMediaMessage",
       });
-      const eventId = result.body.event_id?.trim();
-      if (!eventId) {
-        throw new Error("Matrix sendMediaMessage did not return event_id.");
-      }
-      return eventId;
+    },
+    async redactEvent(opts: { eventId: string; reason?: string; roomId: string }) {
+      const txnId = randomUUID();
+      const reason = opts.reason?.trim();
+      return await sendEvent({
+        body: reason ? { reason } : {},
+        endpoint: `/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}/redact/${encodeURIComponent(opts.eventId)}/${encodeURIComponent(txnId)}`,
+        errorLabel: "redactEvent",
+      });
     },
     async sendReaction(opts: { emoji: string; messageId: string; roomId: string }) {
       const txnId = randomUUID();
-      const result = await requestMatrixJson<{ event_id?: string }>({
-        accessToken: params.accessToken,
-        baseUrl: params.baseUrl,
+      return await sendEvent({
         body: buildMatrixReactionRelation(opts.messageId, opts.emoji),
         endpoint: `/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}/send/m.reaction/${encodeURIComponent(txnId)}`,
-        fetchImpl,
-        method: "PUT",
+        errorLabel: "sendReaction",
       });
-      const eventId = result.body.event_id?.trim();
-      if (!eventId) {
-        throw new Error("Matrix sendReaction did not return event_id.");
-      }
-      return eventId;
     },
     async joinRoom(roomId: string) {
       const result = await requestMatrixJson<{ room_id?: string }>({
@@ -656,7 +765,7 @@ function resolveTopologyMemberAccounts(
   accounts: Record<MatrixQaParticipantRole, MatrixQaRegisteredAccount>,
   memberRoles: MatrixQaParticipantRole[],
 ) {
-  const uniqueRoles = [...new Set(memberRoles)];
+  const uniqueRoles = uniqueValues(memberRoles);
   if (uniqueRoles.length === 0) {
     throw new Error("Matrix QA room provisioning requires at least one member");
   }
@@ -684,6 +793,7 @@ async function provisionMatrixQaTopology(params: {
       fetchImpl: params.fetchImpl,
     });
     const roomId = await creatorClient.createPrivateRoom({
+      encrypted: room.encrypted === true,
       inviteUserIds: invitees.map((entry) => entry.account.userId),
       isDirect: room.kind === "dm",
       name: room.name,
@@ -699,6 +809,7 @@ async function provisionMatrixQaTopology(params: {
       ),
     );
     rooms.push({
+      encrypted: room.encrypted === true,
       key: room.key,
       kind: room.kind,
       memberRoles: members.map((entry) => entry.role),
@@ -791,10 +902,13 @@ export async function provisionMatrixQaRoom(params: {
   } satisfies MatrixQaProvisionResult;
 }
 
-export const __testing = {
+export const testing = {
   buildMatrixQaMessageContent,
+  buildMatrixQaReplacementMessageContent,
   buildMatrixReactionRelation,
+  buildMatrixReplacementRelation,
   buildMatrixThreadRelation,
   createMatrixQaRoomObserver,
   resolveNextRegistrationAuth,
 };
+export { testing as __testing };

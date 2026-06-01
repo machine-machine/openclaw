@@ -1,17 +1,25 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { createProviderApiKeyAuthMethod } from "openclaw/plugin-sdk/provider-auth-api-key";
+import type { ProviderPlugin } from "openclaw/plugin-sdk/provider-model-shared";
+import { normalizeGoogleModelId } from "./model-id.js";
+import { GOOGLE_GEMINI_DEFAULT_MODEL, applyGoogleGeminiModelDefault } from "./onboard.js";
 import {
-  GOOGLE_GEMINI_DEFAULT_MODEL,
-  applyGoogleGeminiModelDefault,
-  normalizeGoogleProviderConfig,
-  normalizeGoogleModelId,
-  resolveGoogleGenerativeAiTransport,
-} from "./api.js";
+  buildGoogleStaticCatalogProvider,
+  buildGoogleVertexStaticCatalogProvider,
+} from "./provider-catalog.js";
 import { GOOGLE_GEMINI_PROVIDER_HOOKS } from "./provider-hooks.js";
 import { isModernGoogleModel, resolveGoogleGeminiForwardCompatModel } from "./provider-models.js";
+import {
+  normalizeGoogleProviderConfig,
+  resolveGoogleGenerativeAiTransport,
+} from "./provider-policy.js";
+import {
+  createGoogleGenerativeAiTransportStreamFn,
+  createGoogleVertexTransportStreamFn,
+} from "./transport-stream.js";
 
-export function registerGoogleProvider(api: OpenClawPluginApi) {
-  api.registerProvider({
+export function buildGoogleProvider(): ProviderPlugin {
+  return {
     id: "google",
     label: "Google AI Studio",
     docsPath: "/providers/models",
@@ -39,16 +47,39 @@ export function registerGoogleProvider(api: OpenClawPluginApi) {
         },
       }),
     ],
-    normalizeTransport: ({ api, baseUrl }) => resolveGoogleGenerativeAiTransport({ api, baseUrl }),
+    normalizeTransport: ({ provider, api, baseUrl }) =>
+      resolveGoogleGenerativeAiTransport({ provider, api, baseUrl }),
     normalizeConfig: ({ provider, providerConfig }) =>
       normalizeGoogleProviderConfig(provider, providerConfig),
+    staticCatalog: {
+      order: "simple",
+      run: async () => ({
+        providers: {
+          google: buildGoogleStaticCatalogProvider(),
+          "google-vertex": buildGoogleVertexStaticCatalogProvider(),
+        },
+      }),
+    },
     normalizeModelId: ({ modelId }) => normalizeGoogleModelId(modelId),
     resolveDynamicModel: (ctx) =>
       resolveGoogleGeminiForwardCompatModel({
         providerId: ctx.provider,
         ctx,
       }),
+    createStreamFn: ({ model }) => {
+      if (model.api === "google-generative-ai") {
+        return createGoogleGenerativeAiTransportStreamFn();
+      }
+      if (model.api === "google-vertex") {
+        return createGoogleVertexTransportStreamFn();
+      }
+      return undefined;
+    },
     ...GOOGLE_GEMINI_PROVIDER_HOOKS,
     isModernModelRef: ({ modelId }) => isModernGoogleModel(modelId),
-  });
+  };
+}
+
+export function registerGoogleProvider(api: OpenClawPluginApi) {
+  api.registerProvider(buildGoogleProvider());
 }

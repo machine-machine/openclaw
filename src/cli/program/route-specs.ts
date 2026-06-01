@@ -8,7 +8,8 @@ import {
 } from "./routed-command-definitions.js";
 
 export type RouteSpec = {
-  match: (path: string[]) => boolean;
+  matches: (path: string[]) => boolean;
+  canRun?: (argv: string[]) => boolean;
   loadPlugins?: boolean | ((argv: string[]) => boolean);
   run: (argv: string[]) => Promise<boolean>;
 };
@@ -25,8 +26,9 @@ function createParsedRoute(params: {
   definition: AnyRoutedCommandDefinition;
 }): RouteSpec {
   return {
-    match: (path) =>
+    matches: (path) =>
       matchesCommandPath(path, params.entry.commandPath, { exact: params.entry.exact }),
+    canRun: (argv) => Boolean(params.definition.parseArgs(argv)),
     loadPlugins: params.entry.route?.preloadPlugins
       ? createCommandLoadPlugins(params.entry.commandPath)
       : undefined,
@@ -48,9 +50,7 @@ export const routedCommands: RouteSpec[] = cliCommandCatalog
     ): entry is CliCommandCatalogEntry & { route: { id: keyof typeof routedCommandDefinitions } } =>
       Boolean(entry.route),
   )
-  .map((entry) =>
-    createParsedRoute({
-      entry,
-      definition: routedCommandDefinitions[entry.route.id],
-    }),
-  );
+  .flatMap((entry) => {
+    const definition = routedCommandDefinitions[entry.route.id];
+    return definition ? [createParsedRoute({ entry, definition })] : [];
+  });

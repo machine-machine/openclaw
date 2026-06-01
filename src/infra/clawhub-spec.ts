@@ -1,4 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 
 export function parseClawHubPluginSpec(raw: string): {
   name: string;
@@ -14,11 +14,19 @@ export function parseClawHubPluginSpec(raw: string): {
     return null;
   }
   const atIndex = spec.lastIndexOf("@");
-  if (atIndex <= 0 || atIndex >= spec.length - 1) {
+  if (atIndex <= 0) {
     return { name: spec };
   }
+  if (atIndex >= spec.length - 1) {
+    return null;
+  }
+  const name = spec.slice(0, atIndex).trim();
+  const version = spec.slice(atIndex + 1).trim();
+  if (!name || !version) {
+    return null;
+  }
   return {
-    name: spec.slice(0, atIndex).trim(),
-    version: spec.slice(atIndex + 1).trim() || undefined,
+    name,
+    version,
   };
 }

@@ -1,3 +1,4 @@
+import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { MediaUnderstandingModelConfig } from "../config/types.tools.js";
 import {
@@ -5,7 +6,6 @@ import {
   resolveEffectiveMediaEntryCapabilities,
 } from "../media-understanding/entry-capabilities.js";
 import { buildMediaUnderstandingCapabilityRegistry } from "../media-understanding/provider-capability-registry.js";
-import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { collectTtsApiKeyAssignments } from "./runtime-config-collectors-tts.js";
 import { evaluateGatewayAuthSurfaceStates } from "./runtime-gateway-auth-surfaces.js";
 import {
@@ -135,12 +135,12 @@ function collectAgentMemorySearchAssignments(params: {
     if (memorySearch?.enabled === false) {
       continue;
     }
-    if (!memorySearch || !Object.prototype.hasOwnProperty.call(memorySearch, "remote")) {
+    if (!memorySearch || !Object.hasOwn(memorySearch, "remote")) {
       hasEnabledAgentWithoutOverride = true;
       continue;
     }
     const remote = isRecord(memorySearch.remote) ? memorySearch.remote : undefined;
-    if (!remote || !Object.prototype.hasOwnProperty.call(remote, "apiKey")) {
+    if (!remote || !Object.hasOwn(remote, "apiKey")) {
       hasEnabledAgentWithoutOverride = true;
       continue;
     }
@@ -173,7 +173,7 @@ function collectAgentMemorySearchAssignments(params: {
       return;
     }
     const remote = isRecord(memorySearch.remote) ? memorySearch.remote : undefined;
-    if (!remote || !Object.prototype.hasOwnProperty.call(remote, "apiKey")) {
+    if (!remote || !Object.hasOwn(remote, "apiKey")) {
       return;
     }
     const enabled = rawAgent.enabled !== false && memorySearch.enabled !== false;
@@ -506,6 +506,29 @@ function collectMessagesTtsAssignments(params: {
   });
 }
 
+function collectAgentTtsAssignments(params: {
+  config: OpenClawConfig;
+  defaults: SecretDefaults | undefined;
+  context: ResolverContext;
+}): void {
+  const agents = params.config.agents as Record<string, unknown> | undefined;
+  const list = agents?.list;
+  if (!Array.isArray(list)) {
+    return;
+  }
+  for (const [index, entry] of list.entries()) {
+    if (!isRecord(entry) || !isRecord(entry.tts)) {
+      continue;
+    }
+    collectTtsApiKeyAssignments({
+      tts: entry.tts,
+      pathPrefix: `agents.list.${index}.tts`,
+      defaults: params.defaults,
+      context: params.context,
+    });
+  }
+}
+
 function collectCronAssignments(params: {
   config: OpenClawConfig;
   defaults: SecretDefaults | undefined;
@@ -568,7 +591,7 @@ function collectSandboxSshAssignments(params: {
     const active =
       normalizeOptionalLowercaseString(effectiveBackend) === "ssh" && effectiveMode !== "off";
     for (const key of ["identityData", "certificateData", "knownHostsData"] as const) {
-      if (ssh && Object.prototype.hasOwnProperty.call(ssh, key)) {
+      if (ssh && Object.hasOwn(ssh, key)) {
         collectSecretInputAssignment({
           value: ssh[key],
           path: `agents.list.${index}.sandbox.ssh.${key}`,
@@ -640,6 +663,7 @@ export function collectCoreConfigAssignments(params: {
   collectGatewayAssignments(params);
   collectSandboxSshAssignments(params);
   collectMessagesTtsAssignments(params);
+  collectAgentTtsAssignments(params);
   collectCronAssignments(params);
   collectMediaRequestAssignments(params);
 }

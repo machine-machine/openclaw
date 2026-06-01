@@ -1,6 +1,8 @@
-import type { StreamFn } from "@mariozechner/pi-agent-core";
-import { streamSimple, type AssistantMessageEvent } from "@mariozechner/pi-ai";
+import type { AssistantMessageEvent } from "../llm/types.js";
 import type { PluginTextReplacement, PluginTextTransforms } from "../plugins/cli-backend.types.js";
+import type { StreamFn } from "./runtime/index.js";
+import type { MutableAssistantMessageEventStream } from "./stream-compat.js";
+import { createStreamIteratorWrapper } from "./stream-iterator-wrapper.js";
 
 export function mergePluginTextTransforms(
   ...transforms: Array<PluginTextTransforms | undefined>
@@ -115,9 +117,9 @@ function transformAssistantEventText(
 }
 
 function wrapStreamTextTransforms(
-  stream: ReturnType<typeof streamSimple>,
+  stream: MutableAssistantMessageEventStream,
   replacements?: PluginTextReplacement[],
-): ReturnType<typeof streamSimple> {
+): MutableAssistantMessageEventStream {
   if (!replacements || replacements.length === 0) {
     return stream;
   }
@@ -128,9 +130,10 @@ function wrapStreamTextTransforms(
   (stream as { [Symbol.asyncIterator]: typeof originalAsyncIterator })[Symbol.asyncIterator] =
     function () {
       const iterator = originalAsyncIterator();
-      return {
-        async next() {
-          const result = await iterator.next();
+      return createStreamIteratorWrapper({
+        iterator,
+        next: async (streamIterator) => {
+          const result = await streamIterator.next();
           return result.done
             ? result
             : {
@@ -138,16 +141,7 @@ function wrapStreamTextTransforms(
                 value: transformAssistantEventText(result.value, replacements),
               };
         },
-        async return(value?: unknown) {
-          return iterator.return?.(value) ?? { done: true as const, value: undefined };
-        },
-        async throw(error?: unknown) {
-          return iterator.throw?.(error) ?? { done: true as const, value: undefined };
-        },
-        [Symbol.asyncIterator]() {
-          return this;
-        },
-      };
+      });
     };
   return stream;
 }

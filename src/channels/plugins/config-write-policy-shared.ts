@@ -11,7 +11,7 @@ type ChannelConfigWithAccounts = {
 };
 
 type ConfigWritePolicyConfig = {
-  channels?: Record<string, ChannelConfigWithAccounts>;
+  channels?: Record<string, unknown>;
 };
 
 export type ConfigWriteScopeLike<TChannelId extends string = string> = {
@@ -48,14 +48,17 @@ function listConfigWriteTargetScopes<TChannelId extends string>(
   return [target.scope];
 }
 
-function resolveChannelConfig<TChannelId extends string>(
+function resolveChannelConfig(
   cfg: ConfigWritePolicyConfig,
-  channelId?: TChannelId | null,
+  channelId?: string | null,
 ): ChannelConfigWithAccounts | undefined {
   if (!channelId) {
     return undefined;
   }
-  return cfg.channels?.[channelId];
+  const channelConfig = cfg.channels?.[channelId];
+  return channelConfig != null && typeof channelConfig === "object" && !Array.isArray(channelConfig)
+    ? (channelConfig as ChannelConfigWithAccounts)
+    : undefined;
 }
 
 function resolveChannelAccountConfig(
@@ -65,9 +68,9 @@ function resolveChannelAccountConfig(
   return resolveAccountEntry(channelConfig.accounts, normalizeAccountId(accountId));
 }
 
-export function resolveChannelConfigWritesShared<TChannelId extends string>(params: {
+export function resolveChannelConfigWritesShared(params: {
   cfg: ConfigWritePolicyConfig;
-  channelId?: TChannelId | null;
+  channelId?: string | null;
   accountId?: string | null;
 }): boolean {
   const channelConfig = resolveChannelConfig(params.cfg, params.channelId);

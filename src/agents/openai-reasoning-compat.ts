@@ -1,4 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 
 type OpenAIReasoningCompatModel = {
   provider?: string | null;
@@ -6,7 +6,7 @@ type OpenAIReasoningCompatModel = {
   compat?: unknown;
 };
 
-const OPENAI_MEDIUM_ONLY_REASONING_MODEL_IDS = new Set(["gpt-5.1-codex-mini", "gpt-5.4-mini"]);
+const OPENAI_MEDIUM_ONLY_REASONING_MODEL_IDS = new Set(["gpt-5.1-codex-mini"]);
 
 function readCompatReasoningEffortMap(compat: unknown): Record<string, string> {
   if (!compat || typeof compat !== "object") {
@@ -31,8 +31,7 @@ export function resolveOpenAIReasoningEffortMap(
   const provider = normalizeLowercaseStringOrEmpty(model.provider ?? "");
   const id = normalizeLowercaseStringOrEmpty(model.id ?? "");
   const builtinMap: Record<string, string> =
-    (provider === "openai" || provider === "openai-codex") &&
-    OPENAI_MEDIUM_ONLY_REASONING_MODEL_IDS.has(id)
+    provider === "openai" && OPENAI_MEDIUM_ONLY_REASONING_MODEL_IDS.has(id)
       ? { minimal: "medium", low: "medium" }
       : {};
   return {
@@ -40,17 +39,4 @@ export function resolveOpenAIReasoningEffortMap(
     ...builtinMap,
     ...readCompatReasoningEffortMap(model.compat),
   };
-}
-
-export function mapOpenAIReasoningEffortForModel(params: {
-  model: OpenAIReasoningCompatModel;
-  effort?: string;
-  fallbackMap?: Record<string, string>;
-}): string | undefined {
-  const { effort } = params;
-  if (effort === undefined || effort === "none") {
-    return effort;
-  }
-  const reasoningEffortMap = resolveOpenAIReasoningEffortMap(params.model, params.fallbackMap);
-  return reasoningEffortMap[effort] ?? effort;
 }

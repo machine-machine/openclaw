@@ -48,6 +48,7 @@ export function registerChannelRuntimeContext(
   });
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Runtime context values are caller-typed by key.
 export function getChannelRuntimeContext<T = unknown>(
   params: ChannelRuntimeContextKey & {
     channelRuntime?: ChannelRuntimeSurface;
@@ -82,10 +83,10 @@ export function watchChannelRuntimeContexts(
   });
 }
 
-export function createTaskScopedChannelRuntime(params: {
-  channelRuntime?: ChannelRuntimeSurface;
+export function createTaskScopedChannelRuntime<T extends ChannelRuntimeSurface>(params: {
+  channelRuntime?: T;
 }): {
-  channelRuntime?: ChannelRuntimeSurface;
+  channelRuntime?: T;
   dispose: () => void;
 } {
   const baseRuntime = params.channelRuntime;
@@ -113,7 +114,7 @@ export function createTaskScopedChannelRuntime(params: {
     };
   };
 
-  const scopedRuntime: ChannelRuntimeSurface = {
+  const scopedRuntime = {
     ...baseRuntime,
     runtimeContexts: {
       ...runtimeContexts,
@@ -122,7 +123,7 @@ export function createTaskScopedChannelRuntime(params: {
         return trackLease(lease);
       },
     },
-  };
+  } as T;
 
   return {
     channelRuntime: scopedRuntime,

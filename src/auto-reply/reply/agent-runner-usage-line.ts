@@ -1,4 +1,10 @@
-import { estimateUsageCost, formatTokenCount, formatUsd } from "../../utils/usage-format.js";
+import {
+  estimateUsageCost,
+  formatTokenCount,
+  formatUsd,
+  type ModelCostConfig,
+} from "../../utils/usage-format.js";
+import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-payload.js";
 import type { ReplyPayload } from "../types.js";
 
 export const formatResponseUsageLine = (params: {
@@ -9,12 +15,7 @@ export const formatResponseUsageLine = (params: {
     cacheWrite?: number;
   };
   showCost: boolean;
-  costConfig?: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-  };
+  costConfig?: ModelCostConfig;
 }): string | null => {
   const usage = params.usage;
   if (!usage) {
@@ -69,7 +70,21 @@ export const appendUsageLine = (payloads: ReplyPayload[], line: string): ReplyPa
     ...existing,
     text: `${existingText}${separator}${line}`,
   };
+  const metadata = getReplyPayloadMetadata(existing);
+  const nextWithMetadata = metadata
+    ? setReplyPayloadMetadata(next, {
+        ...metadata,
+        ...(metadata.sourceReplyTranscriptMirror
+          ? {
+              sourceReplyTranscriptMirror: {
+                ...metadata.sourceReplyTranscriptMirror,
+                text: next.text,
+              },
+            }
+          : {}),
+      })
+    : next;
   const updated = payloads.slice();
-  updated[index] = next;
+  updated[index] = nextWithMetadata;
   return updated;
 };

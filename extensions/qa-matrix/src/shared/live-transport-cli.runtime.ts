@@ -7,15 +7,17 @@ import type { LiveTransportQaCommandOptions } from "./live-transport-cli.js";
 export function resolveLiveTransportQaRunOptions(
   opts: LiveTransportQaCommandOptions,
 ): LiveTransportQaCommandOptions & {
+  outputDir: string;
   repoRoot: string;
   providerMode: QaProviderMode;
 } {
+  const repoRoot = path.resolve(opts.repoRoot ?? process.cwd());
+  const outputDir =
+    resolveRepoRelativeOutputDir(repoRoot, opts.outputDir) ??
+    path.join(repoRoot, ".artifacts", "qa-e2e", `matrix-${Date.now().toString(36)}`);
   return {
-    repoRoot: path.resolve(opts.repoRoot ?? process.cwd()),
-    outputDir: resolveRepoRelativeOutputDir(
-      path.resolve(opts.repoRoot ?? process.cwd()),
-      opts.outputDir,
-    ),
+    repoRoot,
+    outputDir,
     providerMode:
       opts.providerMode === undefined
         ? "live-frontier"
@@ -23,18 +25,11 @@ export function resolveLiveTransportQaRunOptions(
     primaryModel: opts.primaryModel,
     alternateModel: opts.alternateModel,
     fastMode: opts.fastMode,
+    failFast: opts.failFast,
+    profile: opts.profile?.trim(),
     scenarioIds: opts.scenarioIds,
     sutAccountId: opts.sutAccountId,
     credentialSource: opts.credentialSource?.trim(),
     credentialRole: opts.credentialRole?.trim(),
   };
-}
-
-export function printLiveTransportQaArtifacts(
-  laneLabel: string,
-  artifacts: Record<string, string>,
-) {
-  for (const [label, filePath] of Object.entries(artifacts)) {
-    process.stdout.write(`${laneLabel} ${label}: ${filePath}\n`);
-  }
 }

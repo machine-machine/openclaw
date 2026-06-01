@@ -1,15 +1,82 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { buildQaImageGenerationConfigPatch } from "./providers/image-generation.js";
 import {
   fetchJson,
   patchConfig,
+  readConfigSnapshot,
   waitForGatewayHealthy,
   waitForTransportReady,
 } from "./suite-runtime-gateway.js";
 import type { QaSuiteRuntimeEnv } from "./suite-runtime-types.js";
 
 function extractMediaPathFromText(text: string | undefined): string | undefined {
-  return /MEDIA:([^\n]+)/.exec(text ?? "")?.[1]?.trim();
+  if (!text) {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const details = (parsed as Record<string, unknown>).details;
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return undefined;
+  }
+  const media = (details as Record<string, unknown>).media;
+  if (!media || typeof media !== "object" || Array.isArray(media)) {
+    return undefined;
+  }
+  return readFirstMediaPath(media);
+}
+
+function readFirstMediaPath(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const media = value as Record<string, unknown>;
+  for (const key of ["mediaUrl", "path", "filePath"] as const) {
+    const candidate = media[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  const mediaUrls = media.mediaUrls;
+  if (Array.isArray(mediaUrls)) {
+    const mediaUrl = mediaUrls.find(
+      (candidate) => typeof candidate === "string" && candidate.trim(),
+    );
+    if (typeof mediaUrl === "string" && mediaUrl.trim()) {
+      return mediaUrl.trim();
+    }
+  }
+  const attachments = media.attachments;
+  if (Array.isArray(attachments)) {
+    for (const attachment of attachments) {
+      const mediaPath = readFirstMediaPath(attachment);
+      if (mediaPath) {
+        return mediaPath;
+      }
+    }
+  }
+  return undefined;
+}
+
+function readPluginAllow(config: Record<string, unknown>) {
+  const plugins = config.plugins;
+  if (typeof plugins !== "object" || plugins === null || Array.isArray(plugins)) {
+    return [];
+  }
+  const allow = (plugins as { allow?: unknown }).allow;
+  return Array.isArray(allow)
+    ? allow.filter(
+        (pluginId): pluginId is string => typeof pluginId === "string" && pluginId.length > 0,
+      )
+    : [];
 }
 
 async function resolveGeneratedImagePath(params: {
@@ -64,69 +131,23 @@ async function resolveGeneratedImagePath(params: {
     if (match) {
       return match;
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
+    });
   }
   throw new Error(`timed out after ${params.timeoutMs}ms`);
 }
 
 async function ensureImageGenerationConfigured(env: QaSuiteRuntimeEnv) {
-  const imageModelRef = "openai/gpt-image-1";
+  const snapshot = await readConfigSnapshot(env);
   await patchConfig({
     env,
-    patch:
-      env.providerMode === "mock-openai"
-        ? {
-            plugins: {
-              allow: [...new Set(["memory-core", "openai", ...env.transport.requiredPluginIds])],
-              entries: {
-                openai: {
-                  enabled: true,
-                },
-              },
-            },
-            models: {
-              providers: {
-                openai: {
-                  baseUrl: `${env.mock?.baseUrl}/v1`,
-                  apiKey: "test",
-                  api: "openai-responses",
-                  models: [
-                    {
-                      id: "gpt-image-1",
-                      name: "gpt-image-1",
-                      api: "openai-responses",
-                      reasoning: false,
-                      input: ["text"],
-                      cost: {
-                        input: 0,
-                        output: 0,
-                        cacheRead: 0,
-                        cacheWrite: 0,
-                      },
-                      contextWindow: 128_000,
-                      maxTokens: 4096,
-                    },
-                  ],
-                },
-              },
-            },
-            agents: {
-              defaults: {
-                imageGenerationModel: {
-                  primary: imageModelRef,
-                },
-              },
-            },
-          }
-        : {
-            agents: {
-              defaults: {
-                imageGenerationModel: {
-                  primary: imageModelRef,
-                },
-              },
-            },
-          },
+    patch: buildQaImageGenerationConfigPatch({
+      providerMode: env.providerMode,
+      providerBaseUrl: env.mock ? `${env.mock.baseUrl}/v1` : undefined,
+      requiredPluginIds: env.transport.requiredPluginIds,
+      existingPluginIds: readPluginAllow(snapshot.config),
+    }),
   });
   await waitForGatewayHealthy(env);
   await waitForTransportReady(env, 60_000);

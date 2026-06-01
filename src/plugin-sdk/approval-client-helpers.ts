@@ -1,14 +1,14 @@
-import type { ReplyPayload } from "../auto-reply/reply-payload.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../../packages/normalization-core/src/string-coerce.js";
 import type { ExecApprovalForwardTarget } from "../config/types.approvals.js";
 import { matchesApprovalRequestFilters } from "../infra/approval-request-filters.js";
 import { getExecApprovalReplyMetadata } from "../infra/exec-approval-reply.js";
 import type { ExecApprovalRequest } from "../infra/exec-approvals.js";
 import type { PluginApprovalRequest } from "../infra/plugin-approvals.js";
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "../shared/string-coerce.js";
 import type { OpenClawConfig } from "./config-runtime.js";
+import type { ReplyPayload } from "./reply-payload.js";
 import { normalizeAccountId } from "./routing.js";
 
 type ApprovalRequest = ExecApprovalRequest | PluginApprovalRequest;
@@ -44,7 +44,7 @@ export function isChannelExecApprovalClientEnabledFromConfig(params: {
   if (params.approverCount <= 0) {
     return false;
   }
-  return params.enabled !== false;
+  return params.enabled === true || params.enabled === "auto";
 }
 
 export function isChannelExecApprovalTargetRecipient(params: {

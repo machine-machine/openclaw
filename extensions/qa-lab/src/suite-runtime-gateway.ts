@@ -1,7 +1,16 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
+import { isRecord as isPlainObject } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { applyQaMergePatch } from "./suite-merge-patch.js";
+import { liveTurnTimeoutMs } from "./suite-runtime-agent-common.js";
 import type { QaConfigSnapshot, QaSuiteRuntimeEnv } from "./suite-runtime-types.js";
+import { resolveQaGatewayTimeoutWithGraceMs } from "./timer-timeouts.js";
+
+type QaGatewayMutationEnv = Pick<
+  QaSuiteRuntimeEnv,
+  "gateway" | "transport" | "providerMode" | "primaryModel" | "alternateModel"
+>;
 
 async function fetchJson<T>(url: string): Promise<T> {
   const { response, release } = await fetchWithSsrFGuard({
@@ -65,8 +74,30 @@ async function waitForConfigRestartSettle(
   restartDelayMs = 1_000,
   timeoutMs = 60_000,
 ) {
-  await sleep(restartDelayMs + 750);
-  await waitForGatewayHealthy(env, timeoutMs);
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  const readyAfterMs = restartDelayMs + 750;
+  let lastHealthError: unknown = null;
+
+  while (Date.now() < deadline) {
+    try {
+      await waitForGatewayHealthy(env, Math.max(1, Math.min(1_000, deadline - Date.now())));
+      if (Date.now() - startedAt >= readyAfterMs) {
+        const remainingMs = Math.max(1, deadline - Date.now());
+        await waitForTransportReady(env, remainingMs);
+        return;
+      }
+    } catch (error) {
+      lastHealthError = error;
+    }
+    await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
+  }
+
+  throw new Error(
+    `timed out after ${timeoutMs}ms waiting for config restart readiness${
+      lastHealthError ? `: ${formatErrorMessage(lastHealthError)}` : ""
+    }`,
+  );
 }
 
 function formatGatewayPrimaryErrorText(error: unknown) {
@@ -108,6 +139,69 @@ function getGatewayRetryAfterMs(error: unknown) {
   return null;
 }
 
+function areJsonValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false;
+    }
+    return left.every((entry, index) => areJsonValuesEqual(entry, right[index]));
+  }
+  if (isPlainObject(left) || isPlainObject(right)) {
+    if (!isPlainObject(left) || !isPlainObject(right)) {
+      return false;
+    }
+    const leftKeys = Object.keys(left).toSorted();
+    const rightKeys = Object.keys(right).toSorted();
+    if (!areJsonValuesEqual(leftKeys, rightKeys)) {
+      return false;
+    }
+    return leftKeys.every((key) => areJsonValuesEqual(left[key], right[key]));
+  }
+  return false;
+}
+
+function withoutQaConfigApplyVolatileFields(
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const comparable = structuredClone(config);
+  // config.apply updates root metadata on write. Retries should not turn a
+  // completed apply into a metadata-only write/restart loop.
+  delete comparable.meta;
+  return comparable;
+}
+
+function isConfigApplyNoopForSnapshot(config: Record<string, unknown>, raw: string): boolean {
+  let nextConfig: unknown;
+  try {
+    nextConfig = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!isPlainObject(nextConfig)) {
+    return false;
+  }
+  return areJsonValuesEqual(
+    withoutQaConfigApplyVolatileFields(config),
+    withoutQaConfigApplyVolatileFields(nextConfig),
+  );
+}
+
+function isConfigPatchNoopForSnapshot(config: Record<string, unknown>, raw: string): boolean {
+  let patch: unknown;
+  try {
+    patch = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!isPlainObject(patch)) {
+    return false;
+  }
+  return areJsonValuesEqual(applyQaMergePatch(config, patch), config);
+}
+
 async function readConfigSnapshot(env: Pick<QaSuiteRuntimeEnv, "gateway">) {
   const snapshot = (await env.gateway.call(
     "config.get",
@@ -124,7 +218,7 @@ async function readConfigSnapshot(env: Pick<QaSuiteRuntimeEnv, "gateway">) {
 }
 
 async function runConfigMutation(params: {
-  env: Pick<QaSuiteRuntimeEnv, "gateway" | "transport">;
+  env: QaGatewayMutationEnv;
   action: "config.patch" | "config.apply";
   raw: string;
   sessionKey?: string;
@@ -138,9 +232,25 @@ async function runConfigMutation(params: {
   restartDelayMs?: number;
 }) {
   const restartDelayMs = params.restartDelayMs ?? 1_000;
+  const timeoutMs = liveTurnTimeoutMs(params.env, 180_000);
   let lastConflict: unknown = null;
   for (let attempt = 1; attempt <= 8; attempt += 1) {
     const snapshot = await readConfigSnapshot(params.env);
+    if (
+      params.action === "config.patch" &&
+      isConfigPatchNoopForSnapshot(snapshot.config, params.raw)
+    ) {
+      // QA scenarios do best-effort cleanup in finally blocks. Skipping
+      // client-known no-op patches keeps that cleanup from burning the
+      // control-plane write budget and making later capability checks flaky.
+      return { ok: true, noop: true };
+    }
+    if (
+      params.action === "config.apply" &&
+      isConfigApplyNoopForSnapshot(snapshot.config, params.raw)
+    ) {
+      return { ok: true, noop: true };
+    }
     try {
       const result = await params.env.gateway.call(
         params.action,
@@ -152,9 +262,9 @@ async function runConfigMutation(params: {
           ...(params.note ? { note: params.note } : {}),
           restartDelayMs,
         },
-        { timeoutMs: 45_000 },
+        { timeoutMs },
       );
-      await waitForConfigRestartSettle(params.env, restartDelayMs);
+      await waitForConfigRestartSettle(params.env, restartDelayMs, timeoutMs);
       return result;
     } catch (error) {
       if (isConfigHashConflict(error)) {
@@ -166,7 +276,7 @@ async function runConfigMutation(params: {
       }
       const retryAfterMs = getGatewayRetryAfterMs(error);
       if (retryAfterMs && attempt < 8) {
-        await sleep(retryAfterMs + 500);
+        await sleep(resolveQaGatewayTimeoutWithGraceMs(retryAfterMs, 500));
         await waitForGatewayHealthy(params.env, Math.max(15_000, restartDelayMs + 10_000)).catch(
           () => undefined,
         );
@@ -175,15 +285,18 @@ async function runConfigMutation(params: {
       if (!isGatewayRestartRace(error)) {
         throw error;
       }
-      await waitForConfigRestartSettle(params.env, restartDelayMs);
+      await waitForConfigRestartSettle(params.env, restartDelayMs, timeoutMs);
       return { ok: true, restarted: true };
     }
   }
-  throw lastConflict ?? new Error(`${params.action} failed after retrying config hash conflicts`);
+  throw toLintErrorObject(
+    lastConflict ?? new Error(`${params.action} failed after retrying config hash conflicts`),
+    "Non-Error thrown",
+  );
 }
 
 async function patchConfig(params: {
-  env: Pick<QaSuiteRuntimeEnv, "gateway" | "transport">;
+  env: QaGatewayMutationEnv;
   patch: Record<string, unknown>;
   sessionKey?: string;
   deliveryContext?: {
@@ -207,7 +320,7 @@ async function patchConfig(params: {
 }
 
 async function applyConfig(params: {
-  env: Pick<QaSuiteRuntimeEnv, "gateway" | "transport">;
+  env: QaGatewayMutationEnv;
   nextConfig: Record<string, unknown>;
   sessionKey?: string;
   deliveryContext?: {
@@ -233,15 +346,28 @@ async function applyConfig(params: {
 export {
   applyConfig,
   fetchJson,
-  formatGatewayPrimaryErrorText,
   getGatewayRetryAfterMs,
+  isConfigApplyNoopForSnapshot,
+  isConfigPatchNoopForSnapshot,
   isConfigHashConflict,
-  isGatewayRestartRace,
   patchConfig,
   readConfigSnapshot,
-  runConfigMutation,
   waitForConfigRestartSettle,
   waitForGatewayHealthy,
   waitForQaChannelReady,
   waitForTransportReady,
 };
+
+function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
+  if (value instanceof Error) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return new Error(value);
+  }
+  const error = new Error(fallbackMessage, { cause: value });
+  if ((typeof value === "object" && value !== null) || typeof value === "function") {
+    Object.assign(error, value);
+  }
+  return error;
+}

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { runBeforeToolCallHook, type HookContext } from "../agents/agent-tools.before-tool-call.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import {
   MCP_LOOPBACK_SERVER_NAME,
@@ -8,7 +9,11 @@ import {
   jsonRpcResult,
   type JsonRpcRequest,
 } from "./mcp-http.protocol.js";
-import type { McpLoopbackTool, McpToolSchemaEntry } from "./mcp-http.schema.js";
+import {
+  readMcpLoopbackToolName,
+  type McpLoopbackTool,
+  type McpToolSchemaEntry,
+} from "./mcp-http.schema.js";
 
 type McpTextContent = {
   type: "text";
@@ -35,6 +40,8 @@ export async function handleMcpJsonRpc(params: {
   message: JsonRpcRequest;
   tools: McpLoopbackTool[];
   toolSchema: McpToolSchemaEntry[];
+  hookContext?: HookContext;
+  signal?: AbortSignal;
 }): Promise<object | null> {
   const { id, method, params: methodParams } = params.message;
 
@@ -59,9 +66,23 @@ export async function handleMcpJsonRpc(params: {
     case "tools/list":
       return jsonRpcResult(id, { tools: params.toolSchema });
     case "tools/call": {
-      const toolName = methodParams?.name as string;
+      const toolName = typeof methodParams?.name === "string" ? methodParams.name.trim() : "";
       const toolArgs = (methodParams?.arguments ?? {}) as Record<string, unknown>;
-      const tool = params.tools.find((candidate) => candidate.name === toolName);
+      if (!toolName) {
+        return jsonRpcResult(id, {
+          content: [{ type: "text", text: "Tool not available: unknown" }],
+          isError: true,
+        });
+      }
+      if (!params.toolSchema.some((tool) => tool.name === toolName)) {
+        return jsonRpcResult(id, {
+          content: [{ type: "text", text: `Tool not available: ${toolName}` }],
+          isError: true,
+        });
+      }
+      const tool = params.tools.find(
+        (candidate) => readMcpLoopbackToolName(candidate) === toolName,
+      );
       if (!tool) {
         return jsonRpcResult(id, {
           content: [{ type: "text", text: `Tool not available: ${toolName}` }],
@@ -70,7 +91,20 @@ export async function handleMcpJsonRpc(params: {
       }
       const toolCallId = `mcp-${crypto.randomUUID()}`;
       try {
-        const result = await tool.execute(toolCallId, toolArgs);
+        const hookResult = await runBeforeToolCallHook({
+          toolName,
+          params: toolArgs,
+          toolCallId,
+          ctx: params.hookContext,
+          signal: params.signal,
+        });
+        if (hookResult.blocked) {
+          return jsonRpcResult(id, {
+            content: [{ type: "text", text: hookResult.reason }],
+            isError: true,
+          });
+        }
+        const result = await tool.execute(toolCallId, hookResult.params, params.signal);
         return jsonRpcResult(id, {
           content: normalizeToolCallContent(result),
           isError: false,

@@ -1,4 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 
 export type SystemdUnavailableKind =
   | "missing_systemctl"
@@ -27,6 +27,7 @@ export function isSystemdUserBusUnavailableDetail(detail?: string): boolean {
     normalized.includes("failed to connect to user scope bus") ||
     normalized.includes("dbus_session_bus_address") ||
     normalized.includes("xdg_runtime_dir") ||
+    normalized.includes("enomedium") ||
     normalized.includes("no medium found")
   );
 }

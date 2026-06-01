@@ -1,6 +1,8 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { GatewayClient } from "../gateway/client.js";
 import {
   ensureExecApprovals,
@@ -19,8 +21,15 @@ import {
   type ExecHostResponse,
 } from "../infra/exec-host.js";
 import { sanitizeHostExecEnv } from "../infra/host-env-security.js";
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
-import { buildSystemRunApprovalPlan, handleSystemRunInvoke } from "./invoke-system-run.js";
+import {
+  decodeWindowsOutputBuffer,
+  resolveWindowsConsoleEncoding,
+} from "../infra/windows-encoding.js";
+import {
+  buildSystemRunApprovalPlan,
+  handleSystemRunInvoke,
+  resolveEffectiveSystemRunExecPolicy,
+} from "./invoke-system-run.js";
 import type {
   ExecEventPayload,
   ExecFinishedEventParams,
@@ -33,16 +42,6 @@ import { invokeRegisteredNodeHostCommand } from "./plugin-node-host.js";
 const OUTPUT_CAP = 200_000;
 const OUTPUT_EVENT_TAIL = 20_000;
 const DEFAULT_NODE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-const WINDOWS_CODEPAGE_ENCODING_MAP: Record<number, string> = {
-  65001: "utf-8",
-  54936: "gb18030",
-  936: "gbk",
-  950: "big5",
-  932: "shift_jis",
-  949: "euc-kr",
-  1252: "windows-1252",
-};
-let cachedWindowsConsoleEncoding: string | null | undefined;
 
 const execHostEnforced =
   normalizeLowercaseStringOrEmpty(process.env.OPENCLAW_NODE_EXEC_HOST ?? "") === "app";
@@ -66,7 +65,7 @@ type ExecApprovalsSnapshot = {
   file: ExecApprovalsFile;
 };
 
-export type NodeInvokeRequestPayload = {
+type NodeInvokeRequestPayload = {
   id: string;
   nodeId: string;
   command: string;
@@ -105,63 +104,12 @@ function truncateOutput(raw: string, maxChars: number): { text: string; truncate
   return { text: `... (truncated) ${raw.slice(raw.length - maxChars)}`, truncated: true };
 }
 
-export function parseWindowsCodePage(raw: string): number | null {
-  if (!raw) {
-    return null;
-  }
-  const match = raw.match(/\b(\d{3,5})\b/);
-  if (!match?.[1]) {
-    return null;
-  }
-  const codePage = Number.parseInt(match[1], 10);
-  if (!Number.isFinite(codePage) || codePage <= 0) {
-    return null;
-  }
-  return codePage;
-}
-
-function resolveWindowsConsoleEncoding(): string | null {
-  if (process.platform !== "win32") {
-    return null;
-  }
-  if (cachedWindowsConsoleEncoding !== undefined) {
-    return cachedWindowsConsoleEncoding;
-  }
-  try {
-    const result = spawnSync("cmd.exe", ["/d", "/s", "/c", "chcp"], {
-      windowsHide: true,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const raw = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-    const codePage = parseWindowsCodePage(raw);
-    cachedWindowsConsoleEncoding =
-      codePage !== null ? (WINDOWS_CODEPAGE_ENCODING_MAP[codePage] ?? null) : null;
-  } catch {
-    cachedWindowsConsoleEncoding = null;
-  }
-  return cachedWindowsConsoleEncoding;
-}
-
 export function decodeCapturedOutputBuffer(params: {
   buffer: Buffer;
   platform?: NodeJS.Platform;
   windowsEncoding?: string | null;
 }): string {
-  const utf8 = params.buffer.toString("utf8");
-  const platform = params.platform ?? process.platform;
-  if (platform !== "win32") {
-    return utf8;
-  }
-  const encoding = params.windowsEncoding ?? resolveWindowsConsoleEncoding();
-  if (!encoding || normalizeLowercaseStringOrEmpty(encoding) === "utf-8") {
-    return utf8;
-  }
-  try {
-    return new TextDecoder(encoding).decode(params.buffer);
-  } catch {
-    return utf8;
-  }
+  return decodeWindowsOutputBuffer(params);
 }
 
 function redactExecApprovals(file: ExecApprovalsFile): ExecApprovalsFile {
@@ -314,12 +262,12 @@ function resolveExecutable(bin: string, env?: Record<string, string>) {
 }
 
 async function handleSystemWhich(params: SystemWhichParams, env?: Record<string, string>) {
-  const bins = params.bins.map((bin) => bin.trim()).filter(Boolean);
+  const bins = normalizeStringEntries(params.bins);
   const found: Record<string, string> = {};
   for (const bin of bins) {
-    const path = resolveExecutable(bin, env);
-    if (path) {
-      found[bin] = path;
+    const pathLocal = resolveExecutable(bin, env);
+    if (pathLocal) {
+      found[bin] = pathLocal;
     }
   }
   return { bins: found };
@@ -509,8 +457,20 @@ export async function handleInvoke(
         await sendErrorResult(client, frame, "INVALID_REQUEST", prepared.message);
         return;
       }
+      const { getRuntimeConfig } = await import("../config/config.js");
+      const execPolicy = resolveEffectiveSystemRunExecPolicy({
+        cfg: getRuntimeConfig(),
+        agentId: prepared.plan.agentId ?? undefined,
+        defaultSecurity: resolveExecSecurity(undefined),
+        defaultAsk: resolveExecAsk(undefined),
+        requireSocket: preferMacAppExecHost,
+      });
       await sendJsonPayloadResult(client, frame, {
         plan: prepared.plan,
+        execPolicy: {
+          security: execPolicy.security,
+          ask: execPolicy.ask,
+        },
       });
     } catch (err) {
       await sendInvalidRequestResult(client, frame, err);
@@ -560,11 +520,16 @@ export async function handleInvoke(
   });
 }
 
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- CLI JSON params are typed by the invoked method.
 function decodeParams<T>(raw?: string | null): T {
   if (!raw) {
     throw new Error("INVALID_REQUEST: paramsJSON required");
   }
-  return JSON.parse(raw) as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error("INVALID_REQUEST: paramsJSON malformed JSON");
+  }
 }
 
 export function coerceNodeInvokePayload(payload: unknown): NodeInvokeRequestPayload | null {

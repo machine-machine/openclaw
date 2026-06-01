@@ -1,11 +1,11 @@
-import type { MsgContext } from "../../auto-reply/templating.js";
-import { normalizeChatType } from "../../channels/chat-type.js";
-import { resolveConversationLabel } from "../../channels/conversation-label.js";
-import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-} from "../../shared/string-coerce.js";
+} from "@openclaw/normalization-core/string-coerce";
+import type { MsgContext } from "../../auto-reply/templating.js";
+import { normalizeChatType } from "../../channels/chat-type.js";
+import { resolveConversationLabel } from "../../channels/conversation-label.js";
+import { getLoadedChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { buildGroupDisplayName, resolveGroupSessionKey } from "./group.js";
 import type { GroupKeyResolution, SessionEntry, SessionOrigin } from "./types.js";
@@ -139,7 +139,7 @@ export function deriveGroupSessionPatch(params: {
     subjectLooksChannel && resolution.chatType !== "channel" ? normalizeChannelId(channel) : null;
   const isChannelProvider = Boolean(
     normalizedChannel &&
-    getChannelPlugin(normalizedChannel)?.capabilities.chatTypes.includes("channel"),
+    getLoadedChannelPlugin(normalizedChannel)?.capabilities.chatTypes.includes("channel"),
   );
   const nextGroupChannel =
     explicitChannel ??

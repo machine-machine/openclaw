@@ -1,6 +1,8 @@
-export const QA_AGENTIC_PARITY_PACK = "agentic";
+import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 
-export const QA_AGENTIC_PARITY_SCENARIOS = [
+const QA_AGENTIC_PARITY_PACK = "agentic";
+
+const QA_AGENTIC_PARITY_SCENARIOS = [
   {
     id: "approval-turn-tool-followthrough",
     title: "Approval turn tool followthrough",
@@ -37,6 +39,11 @@ export const QA_AGENTIC_PARITY_SCENARIOS = [
     countsTowardValidToolCallRate: true,
   },
   {
+    id: "subagent-stale-child-links",
+    title: "Subagent stale child links",
+    countsTowardValidToolCallRate: false,
+  },
+  {
     id: "memory-recall",
     title: "Memory recall after context switch",
     countsTowardValidToolCallRate: false,
@@ -71,7 +78,7 @@ export function resolveQaParityPackScenarioIds(params: {
   scenarioIds?: string[];
 }): string[] {
   const normalizedPack = params.parityPack?.trim().toLowerCase();
-  const explicitScenarioIds = [...new Set(params.scenarioIds ?? [])];
+  const explicitScenarioIds = uniqueStrings(params.scenarioIds ?? []);
   if (!normalizedPack) {
     return explicitScenarioIds;
   }
@@ -81,5 +88,5 @@ export function resolveQaParityPackScenarioIds(params: {
     );
   }
 
-  return [...new Set([...explicitScenarioIds, ...QA_AGENTIC_PARITY_SCENARIO_IDS])];
+  return uniqueStrings([...explicitScenarioIds, ...QA_AGENTIC_PARITY_SCENARIO_IDS]);
 }

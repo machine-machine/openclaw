@@ -1,17 +1,18 @@
 import crypto from "node:crypto";
+import { clampTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "openclaw/plugin-sdk/text-runtime";
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   ErrorCodes,
   applyBrowserProxyPaths,
   createBrowserControlContext,
   createBrowserRouteDispatcher,
   errorShape,
+  getRuntimeConfig,
   isNodeCommandAllowed,
   isPersistentBrowserProfileMutation,
-  loadConfig,
   persistBrowserProxyFiles,
   resolveNodeCommandAllowlist,
   resolveRequestedBrowserProfile,
@@ -21,6 +22,7 @@ import {
   withTimeout,
   type GatewayRequestHandlers,
   type NodeSession,
+  type OpenClawConfig,
 } from "../core-api.js";
 
 type BrowserRequestParams = {
@@ -88,7 +90,7 @@ function resolveBrowserNode(nodes: NodeSession[], query: string): NodeSession | 
 }
 
 function resolveBrowserNodeTarget(params: {
-  cfg: ReturnType<typeof loadConfig>;
+  cfg: OpenClawConfig;
   nodes: NodeSession[];
 }): NodeSession | null {
   const policy = params.cfg.gateway?.nodes?.browser;
@@ -138,10 +140,7 @@ export async function handleBrowserGatewayRequest({
   const path = normalizeOptionalString(typed.path) ?? "";
   const query = typed.query && typeof typed.query === "object" ? typed.query : undefined;
   const body = typed.body;
-  const timeoutMs =
-    typeof typed.timeoutMs === "number" && Number.isFinite(typed.timeoutMs)
-      ? Math.max(1, Math.floor(typed.timeoutMs))
-      : undefined;
+  const timeoutMs = clampTimerTimeoutMs(typed.timeoutMs);
 
   if (!methodRaw || !path) {
     respond(
@@ -171,8 +170,8 @@ export async function handleBrowserGatewayRequest({
     return;
   }
 
-  const cfg = loadConfig();
-  let nodeTarget: NodeSession | null = null;
+  const cfg = getRuntimeConfig();
+  let nodeTarget: NodeSession | null;
   try {
     nodeTarget = resolveBrowserNodeTarget({
       cfg,
