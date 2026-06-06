@@ -364,11 +364,12 @@ export function mergeConsecutiveUserTurns(
   // injects a second user message containing the same tool_result.
   const seenToolUseIds = new Set<string>();
   const mergedContent = rawContent.filter((block) => {
-    if (block && block.type === "toolResult" && block.toolUseId) {
-      if (seenToolUseIds.has(block.toolUseId)) {
+    const b = block as AnthropicContentBlock;
+    if (b && b.type === "toolResult" && b.toolUseId) {
+      if (seenToolUseIds.has(b.toolUseId)) {
         return false;
       }
-      seenToolUseIds.add(block.toolUseId);
+      seenToolUseIds.add(b.toolUseId);
     }
     return true;
   });
