@@ -2,6 +2,8 @@ export type QdrantConfig = {
   url: string;
   collection: string;
   apiKey?: string;
+  /** Per-agent collection overrides: { agentId: collectionName } */
+  perAgentCollections?: Record<string, string>;
 };
 
 export type EmbeddingsConfig = {
@@ -89,7 +91,11 @@ export const memoryConfigSchema = {
     if (!qdrant || typeof qdrant.url !== "string") {
       throw new Error("qdrant.url is required");
     }
-    assertAllowedKeys(qdrant, ["url", "collection", "apiKey"], "qdrant config");
+    assertAllowedKeys(
+      qdrant,
+      ["url", "collection", "apiKey", "perAgentCollections"],
+      "qdrant config",
+    );
 
     // Embeddings config (required)
     const embeddings = cfg.embeddings as Record<string, unknown> | undefined;
@@ -151,6 +157,12 @@ export const memoryConfigSchema = {
             ? resolveEnvVars(qdrant.collection)
             : DEFAULT_COLLECTION,
         apiKey: typeof qdrant.apiKey === "string" ? resolveEnvVars(qdrant.apiKey) : undefined,
+        perAgentCollections:
+          qdrant.perAgentCollections &&
+          typeof qdrant.perAgentCollections === "object" &&
+          !Array.isArray(qdrant.perAgentCollections)
+            ? (qdrant.perAgentCollections as Record<string, string>)
+            : undefined,
       },
       embeddings: {
         url: resolveEnvVars(embeddings.url as string),

@@ -6,11 +6,105 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { QdrantClient } from "@qdrant/js-client-rest";
+import * as http from "node:http";
 import { Type } from "@sinclair/typebox";
 import OpenAI from "openai";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/memory-lancedb";
-import { Agent, setGlobalDispatcher } from "undici";
+
+// =====================================================================
+// QdrantClientLite — minimal HTTP wrapper around qdrant's REST API using
+// node:http directly. Avoids the @qdrant/js-client-rest stack entirely
+// (and therefore undici/fetch global state) which has been wedging in
+// long-running gateway processes after ~minutes of operation.
+// Implements only the surface the plugin actually uses.
+// =====================================================================
+type QdrantHttpResponse<T> = { result: T };
+class QdrantClient {
+  private host: string;
+  private port: number;
+  private apiKey: string | undefined;
+
+  constructor(opts: { url: string; apiKey?: string; timeout?: number }) {
+    const u = new URL(opts.url);
+    this.host = u.hostname;
+    this.port = Number(u.port) || 6333;
+    this.apiKey = opts.apiKey;
+  }
+
+  private request<T = any>(method: string, path: string, body?: any): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (this.apiKey) headers["api-key"] = this.apiKey;
+      const payload = body == null ? undefined : Buffer.from(JSON.stringify(body));
+      if (payload) headers["Content-Length"] = String(payload.length);
+      const req = http.request(
+        { host: this.host, port: this.port, path, method, headers, timeout: 10_000 },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            const text = Buffer.concat(chunks).toString("utf8");
+            if ((res.statusCode || 0) >= 400) {
+              reject(new Error(`qdrant HTTP ${res.statusCode}: ${text.slice(0, 200)}`));
+              return;
+            }
+            try {
+              resolve(text ? JSON.parse(text) : ({} as any));
+            } catch (e) {
+              reject(e);
+            }
+          });
+        },
+      );
+      req.on("error", reject);
+      req.on("timeout", () => {
+        req.destroy(new Error("qdrant request timeout"));
+      });
+      if (payload) req.write(payload);
+      req.end();
+    });
+  }
+
+  async getCollections(): Promise<{ collections: Array<{ name: string }> }> {
+    const r = await this.request<QdrantHttpResponse<any>>("GET", "/collections");
+    return r.result;
+  }
+  async createCollection(name: string, body: any): Promise<any> {
+    return (await this.request<QdrantHttpResponse<any>>("PUT", `/collections/${name}`, body))
+      .result;
+  }
+  async getCollection(name: string): Promise<any> {
+    return (await this.request<QdrantHttpResponse<any>>("GET", `/collections/${name}`)).result;
+  }
+  async upsert(collection: string, body: any): Promise<any> {
+    return (
+      await this.request<QdrantHttpResponse<any>>(
+        "PUT",
+        `/collections/${collection}/points?wait=true`,
+        body,
+      )
+    ).result;
+  }
+  async search(collection: string, body: any): Promise<any[]> {
+    return (
+      await this.request<QdrantHttpResponse<any[]>>(
+        "POST",
+        `/collections/${collection}/points/search`,
+        body,
+      )
+    ).result;
+  }
+  async delete(collection: string, body: any): Promise<any> {
+    return (
+      await this.request<QdrantHttpResponse<any>>(
+        "POST",
+        `/collections/${collection}/points/delete?wait=true`,
+        body,
+      )
+    ).result;
+  }
+}
+
 import {
   DEFAULT_CAPTURE_MAX_CHARS,
   MEMORY_CATEGORIES,
@@ -115,7 +209,8 @@ class QdrantMemoryDB {
       // startup or container restart):
       //   1. initPromise — set by ensureCollection(); short-circuits retries
       //   2. this.client — QdrantClient instance with stale internal state
-      //   3. undici's process-wide global dispatcher — Node 22's fetch keeps
+      //   (no undici reset needed — we no longer use @qdrant/js-client-rest)
+      //   3. (n/a since http-wrapper experiment) — Node 22's fetch keeps
       //      a shared connection pool whose entries can stay in a poisoned
       //      state for the lifetime of the process; replacing the dispatcher
       //      with a fresh Agent forces every subsequent fetch (including from
@@ -125,12 +220,6 @@ class QdrantMemoryDB {
       // "fetch failed" error indefinitely until the gateway process restarted.
       this.initPromise = null;
       this.client = this.createClient();
-      try {
-        setGlobalDispatcher(new Agent());
-      } catch {
-        // setGlobalDispatcher should never throw in supported Node versions;
-        // swallow defensively so the catch path can't itself break recovery.
-      }
       throw new Error(`m2-memory-engine: failed to ensure Qdrant collection: ${String(err)}`, {
         cause: err,
       });
@@ -566,10 +655,20 @@ const memoryPlugin = {
   register(api: OpenClawPluginApi) {
     const cfg: MemoryConfig = memoryConfigSchema.parse(api.pluginConfig);
 
-    const { url: qdrantUrl, collection, apiKey: qdrantApiKey } = cfg.qdrant;
+    const { url: qdrantUrl, collection, apiKey: qdrantApiKey, perAgentCollections } = cfg.qdrant;
     const { url: embeddingsUrl, apiKey: embeddingsApiKey, model, dimensions } = cfg.embeddings;
 
-    const db = new QdrantMemoryDB(qdrantUrl, collection, dimensions, qdrantApiKey);
+    const dbPool = new Map<string, QdrantMemoryDB>();
+    function getDb(agentId?: string): QdrantMemoryDB {
+      const col = (agentId && perAgentCollections?.[agentId]) ?? collection;
+      let db = dbPool.get(col);
+      if (!db) {
+        db = new QdrantMemoryDB(qdrantUrl, col, dimensions, qdrantApiKey);
+        dbPool.set(col, db);
+      }
+      return db;
+    }
+
     const embeddings = new Embeddings(embeddingsApiKey, model, embeddingsUrl, dimensions);
     const memgraph = new MemgraphClient(cfg.memgraph.url, cfg.memgraph.enabled, api.logger);
     const ner = new NerClient(cfg.ner.url, cfg.ner.enabled, api.logger);
@@ -592,12 +691,12 @@ const memoryPlugin = {
           query: Type.String({ description: "Search query" }),
           limit: Type.Optional(Type.Number({ description: "Max results (default: 5)" })),
         }),
-        async execute(_toolCallId, params) {
+        async execute(_toolCallId, params, ctx?: { agentId?: string }) {
           const { query, limit = 5 } = params as { query: string; limit?: number };
 
           try {
             const vector = await embeddings.embed(query);
-            const results = await db.search(vector, limit, 0.1);
+            const results = await getDb(ctx?.agentId).search(vector, limit, 0.1);
 
             if (results.length === 0) {
               return {
@@ -653,7 +752,7 @@ const memoryPlugin = {
             }),
           ),
         }),
-        async execute(_toolCallId, params) {
+        async execute(_toolCallId, params, ctx?: { agentId?: string }) {
           const {
             text,
             importance = 0.7,
@@ -666,9 +765,10 @@ const memoryPlugin = {
 
           try {
             const vector = await embeddings.embed(text);
+            const d = getDb(ctx?.agentId);
 
             // Check for duplicates
-            const existing = await db.search(vector, 1, cfg.autoCapture.dedupThreshold);
+            const existing = await d.search(vector, 1, cfg.autoCapture.dedupThreshold);
             if (existing.length > 0) {
               return {
                 content: [
@@ -685,7 +785,7 @@ const memoryPlugin = {
               };
             }
 
-            const entry = await db.store({ text, vector, importance, category });
+            const entry = await d.store({ text, vector, importance, category });
 
             // Phase 2: extract entities and store in graph
             if (cfg.ner.enabled && cfg.memgraph.enabled) {
@@ -724,12 +824,13 @@ const memoryPlugin = {
           query: Type.Optional(Type.String({ description: "Search to find memory" })),
           memoryId: Type.Optional(Type.String({ description: "Specific memory ID" })),
         }),
-        async execute(_toolCallId, params) {
+        async execute(_toolCallId, params, ctx?: { agentId?: string }) {
           const { query, memoryId } = params as { query?: string; memoryId?: string };
 
           try {
+            const d = getDb(ctx?.agentId);
             if (memoryId) {
-              await db.delete(memoryId);
+              await d.delete(memoryId);
               return {
                 content: [{ type: "text", text: `Memory ${memoryId} forgotten.` }],
                 details: { action: "deleted", id: memoryId },
@@ -738,7 +839,7 @@ const memoryPlugin = {
 
             if (query) {
               const vector = await embeddings.embed(query);
-              const results = await db.search(vector, 5, 0.7);
+              const results = await d.search(vector, 5, 0.7);
 
               if (results.length === 0) {
                 return {
@@ -748,7 +849,7 @@ const memoryPlugin = {
               }
 
               if (results.length === 1 && results[0].score > 0.9) {
-                await db.delete(results[0].entry.id);
+                await d.delete(results[0].entry.id);
                 return {
                   content: [{ type: "text", text: `Forgotten: "${results[0].entry.text}"` }],
                   details: { action: "deleted", id: results[0].entry.id },
@@ -809,7 +910,7 @@ const memoryPlugin = {
           .action(async (query: string, opts: { limit: string }) => {
             try {
               const vector = await embeddings.embed(query);
-              const results = await db.search(vector, parseInt(opts.limit), 0.3);
+              const results = await getDb().search(vector, parseInt(opts.limit), 0.3);
               const output = results.map((r) => ({
                 id: r.entry.id,
                 text: r.entry.text,
@@ -829,7 +930,7 @@ const memoryPlugin = {
           .description("Show memory statistics")
           .action(async () => {
             try {
-              const count = await db.count();
+              const count = await getDb().count();
               console.log(`Collection: ${collection}`);
               console.log(`Total memories: ${count}`);
               console.log(`Qdrant URL: ${qdrantUrl}`);
@@ -854,14 +955,15 @@ const memoryPlugin = {
 
     // Auto-recall: inject relevant memories before agent starts
     if (cfg.autoRecall.enabled) {
-      api.on("before_agent_start", async (event) => {
+      api.on("before_agent_start", async (event, ctx?: { agentId?: string }) => {
         if (!event.prompt || event.prompt.length < 5) {
           return;
         }
 
         try {
+          const d = getDb(ctx?.agentId);
           const vector = await embeddings.embed(event.prompt);
-          const results = await db.search(
+          const results = await d.search(
             vector,
             cfg.autoRecall.maxResults,
             cfg.autoRecall.minScore,
@@ -920,12 +1022,13 @@ const memoryPlugin = {
 
     // Auto-capture: analyze and store important information after agent ends
     if (cfg.autoCapture.enabled) {
-      api.on("agent_end", async (event) => {
+      api.on("agent_end", async (event, ctx?: { agentId?: string }) => {
         if (!event.success || !event.messages || event.messages.length === 0) {
           return;
         }
 
         try {
+          const d = getDb(ctx?.agentId);
           const texts: string[] = [];
           for (const msg of event.messages) {
             if (!msg || typeof msg !== "object") {
@@ -975,12 +1078,12 @@ const memoryPlugin = {
             const vector = await embeddings.embed(text);
 
             // Dedup check
-            const existing = await db.search(vector, 1, cfg.autoCapture.dedupThreshold);
+            const existing = await d.search(vector, 1, cfg.autoCapture.dedupThreshold);
             if (existing.length > 0) {
               continue;
             }
 
-            await db.store({ text, vector, importance: 0.7, category });
+            await d.store({ text, vector, importance: 0.7, category });
             stored++;
 
             // Phase 2: entity extraction + graph storage
@@ -1023,7 +1126,7 @@ const memoryPlugin = {
                     body: JSON.stringify({
                       memory_id: memId,
                       signal: "retrieval",
-                      agent_id: collection.replace("agent_memory_", ""),
+                      agent_id: ctx?.agentId ?? collection.replace("agent_memory_", ""),
                     }),
                   });
                   if (resp.ok) reinforced++;

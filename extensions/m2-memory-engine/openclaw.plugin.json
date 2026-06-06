@@ -88,6 +88,12 @@
           },
           "apiKey": {
             "type": "string"
+          },
+          "perAgentCollections": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": ["url"]
